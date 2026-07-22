@@ -4,7 +4,7 @@ package com.ibm.ecm.migration;
 public final class RunTerminationException extends Exception {
     public enum Reason {
         FAILED(1, "FAILED"),
-        POLICY(2, "FAILED"),
+        POLICY(2, "POLICY_REFUSED"),
         TIMEOUT(124, "TIMED_OUT"),
         INTERRUPTED(130, "INTERRUPTED");
 

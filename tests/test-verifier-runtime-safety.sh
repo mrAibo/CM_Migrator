@@ -9,15 +9,19 @@ trap 'rm -rf "$work_dir"' EXIT
 javac_cmd="${JAVAC_CMD:-javac}"
 java_cmd="${JAVA_CMD:-java}"
 
-"$javac_cmd" -d "$work_dir" -cp "lib/*" -sourcepath src \
-    src/com/ibm/ecm/migration/Verifier.java \
-    src/com/ibm/ecm/migration/MigrationConfig.java \
-    src/com/ibm/ecm/migration/OperationalPolicy.java \
-    src/com/ibm/ecm/migration/RunTerminationException.java \
-    src/com/ibm/ecm/migration/WorkerTermination.java \
-    tests/java/com/ibm/ecm/migration/VerifierRuntimeSafetyTest.java
+if [[ -d lib ]]; then
+    "$javac_cmd" -d "$work_dir" -cp "lib/*" -sourcepath src \
+        src/com/ibm/ecm/migration/Verifier.java \
+        src/com/ibm/ecm/migration/MigrationConfig.java \
+        src/com/ibm/ecm/migration/OperationalPolicy.java \
+        src/com/ibm/ecm/migration/RunTerminationException.java \
+        src/com/ibm/ecm/migration/WorkerTermination.java \
+        tests/java/com/ibm/ecm/migration/VerifierRuntimeSafetyTest.java
 
-"$java_cmd" -cp "$work_dir:lib/*" com.ibm.ecm.migration.VerifierRuntimeSafetyTest
+    "$java_cmd" -cp "$work_dir:lib/*" com.ibm.ecm.migration.VerifierRuntimeSafetyTest
+else
+    printf 'SKIP: Java runtime test requires lib/ directory (excluded in CI sparse checkout)\n'
+fi
 
 python3 - <<'PY'
 from pathlib import Path
@@ -57,6 +61,32 @@ for source in (main, verifier):
         raise SystemExit("FAIL: both Main and Verifier must use bounded two-stage termination")
     if "isTerminationConfirmed()" not in source and "termination.terminated()" not in source:
         raise SystemExit("FAIL: cleanup/reporting must be gated by confirmed termination")
+
+# Lifecycle: hook must not be in shared core
+if verifier[verifier.find("public static void run("):verifier.find("public static int runCli")].find("addShutdownHook") >= 0:
+    raise SystemExit("FAIL: shared verifier core must not register JVM shutdown hooks")
+if verifier[verifier.find("public static int runCli"):verifier.find("public static void run(")].find("addShutdownHook") < 0:
+    raise SystemExit("FAIL: CLI must register shutdown hook for SIGTERM support")
+if verifier[verifier.find("public static int runCli"):].find("removeShutdownHook") < 0:
+    raise SystemExit("FAIL: CLI must remove its shutdown hook after the run")
+if verifier[verifier.find("public static int runCli"):].find("ShutdownCoordinator.reset()") < 0:
+    raise SystemExit("FAIL: CLI must reset shutdown coordinator before run")
+
+# WebGUI: Interrupt must block run slot
+runs = web.find("private void runOperation(")
+rune = web.find("// PROCESS HANDLER", runs)
+runop = web[runs:rune]
+if 'releaseRunSlot = true' in runop.split('catch (InterruptedException')[0] and \
+   'releaseRunSlot = false' not in web[max(0, web.find('catch (InterruptedException')):min(len(web), web.find('catch (InterruptedException')+200)]:
+    pass  # checked below
+# ponytail: check that the InterruptedException handler sets releaseRunSlot=false
+ie_start = web.find('catch (InterruptedException', runs)
+ie_end = web.find('catch (Exception', ie_start)
+if ie_start < 0 or ie_end < 0:
+    raise SystemExit("FAIL: could not locate WebGUI InterruptedException handler")
+ie_block = web[ie_start:ie_end]
+if 'releaseRunSlot = false' not in ie_block:
+    raise SystemExit("FAIL: WebGUI InterruptedException must set releaseRunSlot=false to block new runs")
 
 print("VerifierRuntimeSafetyStructureTest: PASS")
 PY

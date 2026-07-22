@@ -93,8 +93,14 @@ public class Verifier {
     }
 
     public static int runCli(String[] args) {
+        ShutdownCoordinator.reset();
         String configPath = args.length > 0 ? args[0] : "conf/migration.properties";
+        Thread hook = new Thread(() -> {
+            // ponytail: minimal SIGTERM guard; WebGUI uses its own lifecycle.
+            ShutdownCoordinator.requestShutdown();
+        }, "verifier-cli-shutdown-hook");
         try {
+            Runtime.getRuntime().addShutdownHook(hook);
             run(configPath);
             return 0;
         } catch (RunTerminationException e) {
@@ -103,6 +109,8 @@ public class Verifier {
         } catch (Exception e) {
             logger.error("Verification crashed", e);
             return 1;
+        } finally {
+            try { Runtime.getRuntime().removeShutdownHook(hook); } catch (Exception ignore) { }
         }
     }
 
@@ -177,8 +185,6 @@ public class Verifier {
                     tf,
                     new ThreadPoolExecutor.CallerRunsPolicy()
             );
-
-            setupShutdownHook(executor, pool, verificationLogger, shutdownGraceSeconds);
 
             consoleLogger.info("Initialized Thread Pool with " + threadCount + " threads (queueCapacity=" + queueCapacity + ").");
 
@@ -497,34 +503,6 @@ public class Verifier {
                 logger.warn("Verifier workers may still be active; leaving CM pool and verification logger open.");
             }
         }
-    }
-
-    /**
-     * v1.26: Shutdown hook for clean resource disposal on SIGTERM/INT
-     */
-    private static void setupShutdownHook(final ExecutorService executor,
-                                          final CMConnectionPool pool,
-                                          final VerificationLogger vLogger,
-                                          final long graceSeconds) {
-        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            logger.info("Shutdown signal received (Verifier). Requesting graceful stop...");
-            boolean terminated = executor == null || executor.isTerminated();
-            boolean shutdownAlreadyRequested = ShutdownCoordinator.isShuttingDown();
-            if (!terminated && !shutdownAlreadyRequested) {
-                try {
-                    terminated = WorkerTermination.awaitGrace(
-                            executor, graceSeconds, ShutdownCoordinator::requestShutdown);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                }
-            }
-            if (terminated) {
-                if (vLogger != null) vLogger.close();
-                if (pool != null) pool.close();
-            } else {
-                logger.warn("Verifier shutdown continues with workers still active; leaving CM resources open.");
-            }
-        }, "verifier-shutdown-hook"));
     }
 
     private static JournalSchema detectJournalSchema(Connection conn) {

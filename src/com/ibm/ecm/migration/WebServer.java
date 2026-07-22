@@ -584,6 +584,7 @@ public class WebServer {
             state.status = "INTERRUPTED";
             state.message = "Operation interrupted by operator request";
             state.appendLog(state.message);
+            releaseRunSlot = false;
             logger.error("WebGUI operation interrupted", e);
         } catch (Exception e) {
             state.status = "FAILED";

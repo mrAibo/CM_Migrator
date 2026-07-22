@@ -86,7 +86,7 @@ public final class VerifierRuntimeSafetyTest {
     }
 
     private static void testExitAndWebStatusContract() {
-        assertTermination(RunTerminationException.Reason.POLICY, 2, "FAILED");
+        assertTermination(RunTerminationException.Reason.POLICY, 2, "POLICY_REFUSED");
         assertTermination(RunTerminationException.Reason.TIMEOUT, 124, "TIMED_OUT");
         assertTermination(RunTerminationException.Reason.INTERRUPTED, 130, "INTERRUPTED");
         assertTermination(RunTerminationException.Reason.FAILED, 1, "FAILED");
