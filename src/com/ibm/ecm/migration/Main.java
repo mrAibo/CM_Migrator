@@ -41,6 +41,9 @@ public class Main {
      * Wird auch von der WebGUI aufgerufen, um Ressourcenkonflikte zu vermeiden.
      */
     public static void startMigration(String configPath) throws Exception {
+        ShutdownCoordinator.reset();
+        WorkerFailureState workerFailureState = new WorkerFailureState();
+
         // 1. Load Config
         MigrationConfig config = new MigrationConfig(configPath);
 
@@ -97,7 +100,7 @@ public class Main {
         setupShutdownHook(workerExecutor, pool, journal);
 
         // 6. Start Producer
-        Producer producer = new Producer(queue, config, journal, stats);
+        Producer producer = new Producer(queue, config, journal, stats, workerFailureState);
         workerExecutor.submit(producer);
 
         // 7. Start Consumers
@@ -112,6 +115,7 @@ public class Main {
         workerExecutor.shutdown();
             
         boolean aborted = false;
+        boolean restoreInterrupt = false;
 
         try {
             // Wir warten, bis alle Worker fertig sind (Producer + Consumers).
@@ -126,11 +130,19 @@ public class Main {
             logger.warn("Main thread interrupted. Requesting graceful shutdown.");
             ShutdownCoordinator.requestShutdown();
             workerExecutor.shutdown();
-            Thread.currentThread().interrupt();
             aborted = true;
+            restoreInterrupt = true;
         }
 
-        if (ShutdownCoordinator.isShuttingDown()) {
+        while (!workerExecutor.isTerminated()) {
+            try {
+                workerExecutor.awaitTermination(1, TimeUnit.SECONDS);
+            } catch (InterruptedException repeatedInterrupt) {
+                restoreInterrupt = true;
+            }
+        }
+
+        if (ShutdownCoordinator.isShuttingDown() || workerFailureState.hasFailure()) {
             aborted = true;
         }
 
@@ -185,6 +197,11 @@ public class Main {
                 + " | Success: " + stats.getSuccessItems()
                 + " | Failed: " + stats.getFailedItems());
         System.out.println(ConsoleUI.separator());
+
+        if (restoreInterrupt) {
+            Thread.currentThread().interrupt();
+        }
+        workerFailureState.throwIfPresent("Migration worker failed");
     }
 
     /**
