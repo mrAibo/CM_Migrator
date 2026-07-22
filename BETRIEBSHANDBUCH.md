@@ -944,7 +944,7 @@ Einordnung:
 | `test-tracked-config-hygiene.sh` | dependency-freier Tracking-/Vorlagen-Regressionstest |
 | `bin/compile.sh` | lokaler Java-Compile-/JAR-Build mit vorhandenen freigegebenen Libraries |
 
-`.github/workflows/test.yml` verwendet minimale Read-only-Rechte, Ubuntu und Temurin 17. Ein Blob-gefilterter Sparse-Checkout materialisiert `lib/` nicht. CI führt Shell-Syntax, `git diff --check` und alle IBM-unabhängigen Tests aus. `test-verifier-source-lookup-decision.sh` und der Gesamtbuild bleiben wegen IBM-SDK-/JNI-/Lizenzabhängigkeit ein lokales beziehungsweise privates Gate; es wird kein grüner Hosted-CI-Build vorgetäuscht.
+`.github/workflows/test.yml` verwendet minimale Read-only-Rechte, Ubuntu und Temurin 17. Ein Sparse-Checkout materialisiert `lib/` nicht. CI führt Shell-Syntax, `git diff --check` und alle IBM-unabhängigen Tests aus. `test-verifier-source-lookup-decision.sh` und der Gesamtbuild bleiben wegen IBM-SDK-/JNI-/Lizenzabhängigkeit ein lokales beziehungsweise privates Gate; es wird kein grüner Hosted-CI-Build vorgetäuscht.
 
 Keine dieser Prüfungen ist ein IBM-CM-Live-E2E-Test.
 

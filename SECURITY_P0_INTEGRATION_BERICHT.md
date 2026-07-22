@@ -115,7 +115,7 @@ Java-Tri-State ist implementiert. Kommentare und Fehlermeldung beschreiben den L
 
 ### 6. Dependency-freie CI
 
-`.github/workflows/test.yml` nutzt minimale Read-only-Rechte, Ubuntu, Temurin 17 und offizielle GitHub-Actions. Ein Blob-gefilterter Sparse-Checkout materialisiert `lib/` nicht. Shell-Syntax, Diff-Check und IBM-unabhängige Tests laufen in CI; ein IBM-abhängiger grüner Build wird nicht vorgetäuscht.
+`.github/workflows/test.yml` nutzt minimale Read-only-Rechte, Ubuntu, Temurin 17 und offizielle GitHub-Actions. Ein Sparse-Checkout materialisiert `lib/` nicht. Shell-Syntax, Diff-Check und IBM-unabhängige Tests laufen in CI; ein IBM-abhängiger grüner Build wird nicht vorgetäuscht.
 
 ## Weiterhin offene Blocker / Abnahmen
 
