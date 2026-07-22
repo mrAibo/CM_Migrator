@@ -1,6 +1,6 @@
 # Abschlussbericht: Security-Baseline und P0-Integration
 
-> GitHub: [Draft-PR #1](https://github.com/mrAibo/CM_Migrator/pull/1)  
+> GitHub: [Draft-PR #1](https://github.com/mrAibo/CM_Migrator/pull/1)
 > Urteil: **Draft beibehalten; nicht nach `main` mergen, bis die dokumentierten Readiness-Blocker geschlossen sind.**
 
 ## Status
@@ -10,7 +10,7 @@
 - Base: `main` (`e95c5bd5a7fb1abcef7c4b0876bb2ced1a1bb1e1`)
 - Geprüfter Funktionsstand: `4c6c87df2cb4ab4af1cf2d80b719dcc83c0683b2`
 - Berichtsbranch: `hardening/security-baseline`
-- Geprüfter Funktionsumfang vor diesem reinen Doku-Commit: 46 Commits, 31 Dateien, +2238/−136
+- Geprüfter Funktionsumfang vor den reinen Doku-Commits dieses Berichts: 46 Commits, 31 Dateien, +2238/−136
 - `main` ist direkter Vorfahr; es gibt 0 `main`-only Commits.
 - Synthetischer Merge-Tree: konfliktfrei.
 
