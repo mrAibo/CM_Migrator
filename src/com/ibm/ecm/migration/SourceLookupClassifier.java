@@ -1,6 +1,7 @@
 package com.ibm.ecm.migration;
 
 import java.util.Locale;
+import java.util.regex.Pattern;
 
 /**
  * Conservative classifier for IBM CM source-item lookup failures.
@@ -20,44 +21,40 @@ public final class SourceLookupClassifier {
 
         String normalizedPid = normalize(sourcePid);
         Throwable current = failure;
+        boolean confirmedNotFound = false;
         int depth = 0;
 
         while (current != null && depth < 16) {
             String message = normalize(current.getMessage());
-            if (isConfirmedObjectNotFound(message, normalizedPid)) {
-                return SourceLookupStatus.NOT_FOUND;
+            if (!message.isEmpty()) {
+                if (!isConfirmedObjectNotFound(message, normalizedPid)) {
+                    return SourceLookupStatus.ERROR;
+                }
+                confirmedNotFound = true;
             }
             current = current.getCause();
             depth++;
         }
 
-        return SourceLookupStatus.ERROR;
+        if (current != null) {
+            return SourceLookupStatus.ERROR;
+        }
+        return confirmedNotFound ? SourceLookupStatus.NOT_FOUND : SourceLookupStatus.ERROR;
     }
 
     static boolean isConfirmedObjectNotFound(String normalizedMessage, String normalizedPid) {
-        if (normalizedMessage.isEmpty()) {
+        if (normalizedMessage.isEmpty() || normalizedPid.isEmpty()) {
             return false;
         }
 
-        if (containsObjectNotFoundPhrase(normalizedMessage)) {
-            return true;
-        }
-
-        return normalizedMessage.contains("dkc_unknown")
-                && !normalizedPid.isEmpty()
-                && normalizedMessage.contains(normalizedPid);
-    }
-
-    private static boolean containsObjectNotFoundPhrase(String message) {
-        return message.contains("item not found")
-                || message.contains("object not found")
-                || message.contains("document not found")
-                || message.contains("item does not exist")
-                || message.contains("object does not exist")
-                || message.contains("document does not exist")
-                || message.contains("item no longer exists")
-                || message.contains("object no longer exists")
-                || message.contains("document no longer exists");
+        String pid = Pattern.quote(normalizedPid);
+        String separator = "(?:\\s*[:=-]\\s*|\\s+)";
+        String objectNotFound = "(?:item|object|document)\\s+"
+                + "(?:not\\s+found|does\\s+not\\s+exist|no\\s+longer\\s+exists)"
+                + separator + pid;
+        String dkcUnknown = "dkc_unknown\\s+while\\s+retrieving\\s+" + pid;
+        return Pattern.matches("(?:" + objectNotFound + "|" + dkcUnknown + ")\\s*[.!]?",
+                normalizedMessage);
     }
 
     private static String normalize(String value) {

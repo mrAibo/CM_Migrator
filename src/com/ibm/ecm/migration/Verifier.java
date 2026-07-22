@@ -653,33 +653,45 @@ public class Verifier {
                 destConn = pool.borrowDest();
                 
                 // v1.25: Check if source still exists BEFORE attempting hash compare
-                boolean sourceExists = checkSourceExists(sourceConn.getDatastore(), sourcePid);
-                
-                if (!sourceExists) {
-                    // Source item was deleted from Source CM
-                    totalSourceDeleted.incrementAndGet();
-                    logger.warn("SOURCE_DELETED: {} no longer exists in source system", sourcePid);
-                    
-                    if (cascadeDeleteEnabled) {
-                        // Cascade delete: remove from destination as well
-                        boolean deleteSuccess = cascadeDeleteDest(destConn.getDatastore(), destPid);
-                        if (deleteSuccess) {
-                            logVerificationResult(verificationLogger, jdbcUrl, sourcePid, "CASCADE_DELETED", null, null, 
-                                "Source deleted, destination item " + destPid + " also deleted");
-                            totalCascadeDeleted.incrementAndGet();
+                SourceLookupStatus sourceStatus = checkSourceStatus(sourceConn.getDatastore(), sourcePid);
+
+                switch (sourceStatus) {
+                    case EXISTS:
+                        break;
+
+                    case NOT_FOUND:
+                        totalSourceDeleted.incrementAndGet();
+                        logger.warn("SOURCE_DELETED: {} no longer exists in source system", sourcePid);
+
+                        if (shouldCascadeDelete(sourceStatus, cascadeDeleteEnabled)) {
+                            // Cascade delete: remove from destination as well
+                            boolean deleteSuccess = cascadeDeleteDest(destConn.getDatastore(), destPid);
+                            if (deleteSuccess) {
+                                logVerificationResult(verificationLogger, jdbcUrl, sourcePid, "CASCADE_DELETED", null, null,
+                                    "Source deleted, destination item " + destPid + " also deleted");
+                                totalCascadeDeleted.incrementAndGet();
+                            } else {
+                                logVerificationResult(verificationLogger, jdbcUrl, sourcePid, "CASCADE_DELETE_FAILED", null, null,
+                                    "Source deleted, but failed to delete destination item " + destPid);
+                                totalErrors.incrementAndGet();
+                            }
                         } else {
-                            logVerificationResult(verificationLogger, jdbcUrl, sourcePid, "CASCADE_DELETE_FAILED", null, null, 
-                                "Source deleted, but failed to delete destination item " + destPid);
-                            totalErrors.incrementAndGet();
+                            // Just mark as orphaned (source deleted, dest still exists)
+                            logVerificationResult(verificationLogger, jdbcUrl, sourcePid, "ORPHANED", null, null,
+                                "Source deleted, destination item " + destPid + " still exists (cascade delete disabled)");
                         }
-                    } else {
-                        // Just mark as orphaned (source deleted, dest still exists)
-                        logVerificationResult(verificationLogger, jdbcUrl, sourcePid, "ORPHANED", null, null, 
-                            "Source deleted, destination item " + destPid + " still exists (cascade delete disabled)");
-                    }
-                    return false; // Not a successful verification
+                        return false; // Not a successful verification
+
+                    case ERROR:
+                    default:
+                        String lookupMessage = "Source lookup failed for " + sourcePid
+                                + "; cascade delete refused (status=" + sourceStatus + ")";
+                        logger.error(lookupMessage);
+                        logVerificationResult(verificationLogger, jdbcUrl, sourcePid, "ERROR", null, null, lookupMessage);
+                        totalErrors.incrementAndGet();
+                        return false;
                 }
-                
+
                 // Source exists - proceed with normal hash verification
                 VerificationResult result = verifyItem(sourceConn.getDatastore(), sourcePid, destConn.getDatastore(), destPid, null);
 
@@ -1000,12 +1012,16 @@ public class Verifier {
     // ========================================================================
 
     /**
-     * Checks if the source item still exists (can be retrieved).
-     * Returns true if exists, false if it was deleted or cannot be found.
+     * Checks whether the source item can be retrieved.
+     * Only a classifier-confirmed missing object returns NOT_FOUND; all uncertain
+     * or technical failures return ERROR and therefore fail closed.
      */
-    private static boolean checkSourceExists(DKDatastoreICM sourceDs, String sourcePid) {
-        if (sourceDs == null || sourcePid == null || sourcePid.isEmpty()) return false;
-        
+    private static SourceLookupStatus checkSourceStatus(DKDatastoreICM sourceDs, String sourcePid) {
+        if (sourceDs == null || sourcePid == null || sourcePid.isEmpty()) {
+            logger.error("Source lookup cannot run with missing datastore or PID; cascade delete refused");
+            return SourceLookupStatus.ERROR;
+        }
+
         DKDDO item = null;
         DKRetrieveOptionsICM dkOpt = null;
         try {
@@ -1016,19 +1032,23 @@ public class Verifier {
             dkOpt.partsList(false);
             dkOpt.resourceContent(false);
             item.retrieve(dkOpt.dkNVPair());
-            return true; // Item exists
+            return SourceLookupStatus.EXISTS;
         } catch (Exception e) {
-            // DKException or similar -> item probably deleted or inaccessible
-            String msg = e.getMessage();
-            if (msg != null && (msg.contains("DKC_UNKNOWN") || msg.contains("does not exist") || msg.contains("not found"))) {
-                logger.debug("Source item {} not found (likely deleted): {}", sourcePid, msg);
+            SourceLookupStatus status = SourceLookupClassifier.fromFailure(e, sourcePid);
+            if (status == SourceLookupStatus.NOT_FOUND) {
+                logger.warn("Source item {} confirmed not found", sourcePid, e);
             } else {
-                logger.warn("Source item {} check failed: {}", sourcePid, msg);
+                logger.error("Source item {} lookup failed; cascade delete refused", sourcePid, e);
             }
-            return false;
+            return status;
         } finally {
-            item = null; dkOpt = null;
+            item = null;
+            dkOpt = null;
         }
+    }
+
+    static boolean shouldCascadeDelete(SourceLookupStatus sourceStatus, boolean cascadeDeleteEnabled) {
+        return cascadeDeleteEnabled && sourceStatus == SourceLookupStatus.NOT_FOUND;
     }
 
     /**
