@@ -30,6 +30,9 @@ public class Main {
 
         try {
             startMigration(configPath);
+        } catch (RunTerminationException e) {
+            logger.error("Migration terminated: {}", e.getMessage(), e.getCause());
+            System.exit(e.getExitCode());
         } catch (Exception e) {
             logger.error("Migration failed", e);
             System.exit(1);
@@ -44,8 +47,9 @@ public class Main {
         ShutdownCoordinator.reset();
         WorkerFailureState workerFailureState = new WorkerFailureState();
 
-        // 1. Load Config
+        // 1. Load Config and enforce the global destructive-operation policy.
         MigrationConfig config = new MigrationConfig(configPath);
+        OperationalPolicy.enforceCascadeDeleteDisabled(config);
 
         // Round 13A: SDK-Capability-Probe + Fail-Fast für >2 GB-sichere Pfade.
         // Verhindert, dass eine 30M-Items-Migration nachts startet und dann
@@ -97,7 +101,7 @@ public class Main {
         startResourceMonitor();
 
         // Setup Shutdown Hook
-        setupShutdownHook(workerExecutor, pool, journal);
+        setupShutdownHook(workerExecutor, pool, journal, config.getShutdownGraceSeconds());
 
         // 6. Start Producer
         Producer producer = new Producer(queue, config, journal, stats, workerFailureState);
@@ -110,43 +114,51 @@ public class Main {
             workerExecutor.submit(consumer);
         }
 
-        // 8. Wait for completion
-        // Wir fahren den Worker-Pool herunter. Das blockiert NICHT wegen dem Monitor.
-        workerExecutor.shutdown();
-            
-        boolean aborted = false;
-        boolean restoreInterrupt = false;
-
+        // 8. Bounded two-stage wait. Native SDK calls are never force-stopped.
+        RunTerminationException terminalOutcome = null;
+        WorkerTermination.Outcome termination;
         try {
-            // Wir warten, bis alle Worker fertig sind (Producer + Consumers).
-            // Da Producer Poison-Pills sendet, beenden sich die Consumer von selbst.
-            if (!workerExecutor.awaitTermination(24, TimeUnit.HOURS)) {
-                logger.warn("Worker executor did not finish within timeout. Requesting shutdown without interrupting SDK calls.");
-                ShutdownCoordinator.requestShutdown();
-                workerExecutor.shutdown();
-                aborted = true;
-            }
+            termination = WorkerTermination.await(
+                    workerExecutor,
+                    config.getWorkerTimeoutSeconds(),
+                    config.getShutdownGraceSeconds(),
+                    ShutdownCoordinator::requestShutdown);
         } catch (InterruptedException e) {
-            logger.warn("Main thread interrupted. Requesting graceful shutdown.");
-            ShutdownCoordinator.requestShutdown();
-            workerExecutor.shutdown();
-            aborted = true;
-            restoreInterrupt = true;
+            boolean terminated = WorkerTermination.awaitGraceAfterInterrupt(
+                    workerExecutor,
+                    config.getShutdownGraceSeconds(),
+                    ShutdownCoordinator::requestShutdown);
+            termination = new WorkerTermination.Outcome(false, terminated);
+            terminalOutcome = new RunTerminationException(
+                    RunTerminationException.Reason.INTERRUPTED,
+                    "Migration interrupted by operator request.",
+                    terminated,
+                    e);
         }
 
-        while (!workerExecutor.isTerminated()) {
-            try {
-                workerExecutor.awaitTermination(1, TimeUnit.SECONDS);
-            } catch (InterruptedException repeatedInterrupt) {
-                restoreInterrupt = true;
-            }
+        boolean workersTerminated = termination.terminated();
+        if (termination.timedOut()) {
+            terminalOutcome = new RunTerminationException(
+                    RunTerminationException.Reason.TIMEOUT,
+                    workersTerminated
+                            ? "Migration timed out; workers stopped during the grace period."
+                            : "Migration timed out; worker termination is not confirmed.",
+                    workersTerminated,
+                    null);
         }
 
-        if (ShutdownCoordinator.isShuttingDown() || workerFailureState.hasFailure()) {
-            aborted = true;
+        boolean aborted = terminalOutcome != null
+                || ShutdownCoordinator.isShuttingDown()
+                || workerFailureState.hasFailure();
+        if (terminalOutcome == null && ShutdownCoordinator.isShuttingDown()) {
+            terminalOutcome = new RunTerminationException(
+                    RunTerminationException.Reason.INTERRUPTED,
+                    "Migration stopped by shutdown request.",
+                    workersTerminated,
+                    null);
         }
 
-        if (!aborted) {
+        if (!aborted && workersTerminated) {
             // Generate migration protocol reports if enabled
             if (config.isGenerateAuditProtocol()) {
                 try {
@@ -170,26 +182,33 @@ public class Main {
                 logger.error("Failed to generate legacy report or send email: {}", e.getMessage());
             }
         } else {
-            logger.warn("Migration was aborted. Skipping final reports and email notification.");
+            logger.warn("Migration did not complete normally. Skipping final reports and email notification.");
         }
 
-        // KRITISCH: Pool sofort schließen, nachdem die Worker fertig sind.
-        // Verhindert, dass asynchrone Refill-Prozesse während des Beendens Verbindungen öffnen.
-        pool.close();
-        journal.close();
-            
-        // Stop monitor
-        monitorThread.interrupt();
-        try {
-            monitorThread.join(5000);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
+        if (workersTerminated) {
+            // Only disconnect resources after every worker has definitely stopped.
+            pool.close();
+            journal.close();
+            monitorThread.interrupt();
+            try {
+                monitorThread.join(5000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                if (terminalOutcome == null) {
+                    terminalOutcome = new RunTerminationException(
+                            RunTerminationException.Reason.INTERRUPTED,
+                            "Migration interrupted during confirmed cleanup.",
+                            true,
+                            e);
+                }
+            }
+        } else {
+            logger.warn("Workers may still be active; leaving CM pool, journal, and monitor open.");
         }
-            
-        // Finale Statistik-Ausgabe in der Konsole
+
         System.out.println("\n" + ConsoleUI.separator());
         if (aborted) {
-            System.out.println("Migration aborted by shutdown request.");
+            System.out.println("Migration did not complete normally.");
         } else {
             System.out.println("Migration completed!");
         }
@@ -198,8 +217,8 @@ public class Main {
                 + " | Failed: " + stats.getFailedItems());
         System.out.println(ConsoleUI.separator());
 
-        if (restoreInterrupt) {
-            Thread.currentThread().interrupt();
+        if (terminalOutcome != null) {
+            throw terminalOutcome;
         }
         workerFailureState.throwIfPresent("Migration worker failed");
     }
@@ -209,31 +228,18 @@ public class Main {
      */
     private static void setupShutdownHook(final ExecutorService executor,
                                           final CMConnectionPool pool,
-                                          final MigrationJournal journal) {
+                                          final MigrationJournal journal,
+                                          final long graceSeconds) {
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             logger.info("Shutdown signal received. Requesting graceful stop...");
-            ShutdownCoordinator.requestShutdown();
-
-            boolean terminated = false;
-
-            if (executor != null) {
-                executor.shutdown();
-
-                long waitSeconds = Long.getLong("cm.migrator.shutdown.graceSeconds", 60L);
-                long deadline = System.currentTimeMillis() + (waitSeconds * 1000L);
-
-                while (!terminated && System.currentTimeMillis() < deadline) {
-                    try {
-                        terminated = executor.awaitTermination(1, TimeUnit.SECONDS);
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        break;
-                    }
-                }
-
-                if (!terminated) {
-                    logger.warn("Workers did not stop within {} seconds. JVM shutdown continues without shutdownNow().",
-                            waitSeconds);
+            boolean terminated = executor == null || executor.isTerminated();
+            boolean shutdownAlreadyRequested = ShutdownCoordinator.isShuttingDown();
+            if (!terminated && !shutdownAlreadyRequested) {
+                try {
+                    terminated = WorkerTermination.awaitGrace(
+                            executor, graceSeconds, ShutdownCoordinator::requestShutdown);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
                 }
             }
 
@@ -242,10 +248,7 @@ public class Main {
                 if (journal != null) journal.close();
                 logger.info("Cleanup complete. Goodbye.");
             } else {
-                // Nicht den Pool unter laufenden IBM-SDK-Deletes schließen.
-                // JVM/OS räumt beim Prozessende auf; wichtiger ist, keine Fehlerflut
-                // durch aktiv getrennte Verbindungen zu erzeugen.
-                logger.warn("Shutdown continues with workers still active; leaving CM pool/journal unclosed to avoid disconnecting in-flight SDK operations.");
+                logger.warn("Shutdown continues with workers still active; leaving CM pool/journal open.");
             }
         }, "shutdown-hook"));
     }

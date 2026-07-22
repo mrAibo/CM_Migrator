@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+work_dir="$(mktemp -d)"
+trap 'rm -rf "$work_dir"' EXIT
+
+javac_cmd="${JAVAC_CMD:-javac}"
+java_cmd="${JAVA_CMD:-java}"
+
+"$javac_cmd" -d "$work_dir" -cp "lib/*" -sourcepath src \
+    src/com/ibm/ecm/migration/Verifier.java \
+    src/com/ibm/ecm/migration/MigrationConfig.java \
+    src/com/ibm/ecm/migration/OperationalPolicy.java \
+    src/com/ibm/ecm/migration/RunTerminationException.java \
+    src/com/ibm/ecm/migration/WorkerTermination.java \
+    tests/java/com/ibm/ecm/migration/VerifierRuntimeSafetyTest.java
+
+"$java_cmd" -cp "$work_dir:lib/*" com.ibm.ecm.migration.VerifierRuntimeSafetyTest
+
+python3 - <<'PY'
+from pathlib import Path
+
+verifier = Path("src/com/ibm/ecm/migration/Verifier.java").read_text()
+main = Path("src/com/ibm/ecm/migration/Main.java").read_text()
+web = Path("src/com/ibm/ecm/migration/WebServer.java").read_text()
+
+run = verifier[verifier.find("public static void run("):]
+policy = run.find("OperationalPolicy.enforceCascadeDeleteDisabled(config);")
+connect = run.find("new CMConnectionPool(config)")
+workers = run.find("new ThreadPoolExecutor(")
+journal_write = run.find("new VerificationLogger()")
+report = run.find("ReportGenerator.generateVerificationReport")
+if min(policy, connect, workers, journal_write, report) < 0:
+    raise SystemExit("FAIL: could not locate verifier policy/callflow markers")
+if not policy < connect and policy < workers and policy < journal_write and policy < report:
+    raise SystemExit("FAIL: cascade policy must run before connect/workers/journal/report")
+
+if "Verifier.main(new String[]{runConfigFile})" in web:
+    raise SystemExit("FAIL: WebGUI must call the throwing Verifier core, never CLI main")
+if web.count("Verifier.run(runConfigFile)") < 2:
+    raise SystemExit("FAIL: WebGUI verify and safe flows must call Verifier.run")
+
+common = verifier[verifier.find("public static void run("):]
+if "System.exit(" in common:
+    raise SystemExit("FAIL: common verifier core must not terminate the JVM")
+if 'state.status = "COMPLETED"' not in web:
+    raise SystemExit("FAIL: expected WebGUI success state not found")
+if 'state.status = e.getWebStatus();' not in web:
+    raise SystemExit("FAIL: WebGUI must map typed terminal outcomes to their status")
+if 'state.status = "INTERRUPTED";' not in web or 'state.status = "FAILED";' not in web:
+    raise SystemExit("FAIL: WebGUI fallback terminal statuses are missing")
+
+for source in (main, verifier):
+    if "WorkerTermination.await(" not in source:
+        raise SystemExit("FAIL: both Main and Verifier must use bounded two-stage termination")
+    if "isTerminationConfirmed()" not in source and "termination.terminated()" not in source:
+        raise SystemExit("FAIL: cleanup/reporting must be gated by confirmed termination")
+
+print("VerifierRuntimeSafetyStructureTest: PASS")
+PY

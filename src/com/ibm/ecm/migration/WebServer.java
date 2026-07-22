@@ -527,6 +527,7 @@ public class WebServer {
         state.appendLog("Starting operation");
 
         Path runConfig = null;
+        boolean releaseRunSlot = true;
         try {
             runConfig = createRunConfigSnapshot(configPath, requestedMode, state.runId);
             String runConfigFile = runConfig.toString();
@@ -546,12 +547,12 @@ public class WebServer {
 
                 state.currentStep = "Step 2/2: verification";
                 state.appendLog("SAFE workflow: verification started");
-                Verifier.main(new String[]{runConfigFile});
+                Verifier.run(runConfigFile);
                 state.appendLog("SAFE workflow: verification completed");
             } else if ("verify".equals(mode) || "verification".equals(mode)) {
                 state.currentStep = "Verification";
                 state.appendLog("Verification started");
-                Verifier.main(new String[]{runConfigFile});
+                Verifier.run(runConfigFile);
                 state.appendLog("Verification completed");
             } else if ("delete".equals(mode)) {
                 state.currentStep = "Delete";
@@ -567,19 +568,45 @@ public class WebServer {
 
             state.status = "COMPLETED";
             state.message = "Operation completed";
+        } catch (RunTerminationException e) {
+            state.status = e.getWebStatus();
+            state.message = webMessageFor(e.getReason());
+            state.appendLog(state.message);
+            releaseRunSlot = e.isTerminationConfirmed();
+            logger.error("WebGUI operation terminated: reason={}, terminationConfirmed={}",
+                    e.getReason(), e.isTerminationConfirmed(), e.getCause());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            state.status = "STOPPED";
-            state.message = e.getMessage();
-            state.appendLog("Operation stopped: " + e.getMessage());
+            state.status = "INTERRUPTED";
+            state.message = "Operation interrupted by operator request";
+            state.appendLog(state.message);
+            logger.error("WebGUI operation interrupted", e);
         } catch (Exception e) {
             state.status = "FAILED";
-            state.message = e.getMessage();
-            state.appendLog("Operation failed: " + e.getMessage());
+            state.message = "Operation failed; see server logs";
+            state.appendLog(state.message);
             logger.error("WebGUI operation failed", e);
         } finally {
             state.finishedAtMs = System.currentTimeMillis();
-            migrationRunning.set(false);
+            if (releaseRunSlot) {
+                migrationRunning.set(false);
+            } else {
+                logger.warn("WebGUI run slot remains blocked because worker termination is unconfirmed.");
+            }
+        }
+    }
+
+    private static String webMessageFor(RunTerminationException.Reason reason) {
+        switch (reason) {
+            case POLICY:
+                return "Operation refused by security policy";
+            case TIMEOUT:
+                return "Operation timed out";
+            case INTERRUPTED:
+                return "Operation interrupted by operator request";
+            case FAILED:
+            default:
+                return "Operation failed; see server logs";
         }
     }
 
