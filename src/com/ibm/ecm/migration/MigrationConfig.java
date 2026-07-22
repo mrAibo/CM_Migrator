@@ -440,11 +440,15 @@ public class MigrationConfig {
     // ========================================================================
 
     /**
-     * Falls aktiv, werden Items am Ziel gelöscht, wenn sie an der Quelle nicht mehr existieren.
-     * ACHTUNG: Destruktive Operation! Standard: false
+     * Cascade Delete remains disabled at the Java configuration boundary until
+     * the verifier uses an explicit EXISTS / NOT_FOUND / ERROR source lookup.
+     * This protects direct Java invocations that bypass the shell preflight.
      */
     public boolean isCascadeDeleteOnMissing() {
-        return propBool("CASCADE_DELETE_ON_MISSING", false);
+        if (propBool("CASCADE_DELETE_ON_MISSING", false)) {
+            logger.error("CASCADE_DELETE_ON_MISSING was requested but is disabled until tri-state source lookup is integrated.");
+        }
+        return false;
     }
 
     /**
