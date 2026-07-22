@@ -556,7 +556,7 @@ public class WebServer {
             } else if ("delete".equals(mode)) {
                 state.currentStep = "Delete";
                 state.appendLog("Delete started");
-                Main.main(new String[]{runConfigFile});
+                Main.startMigration(runConfigFile);
                 state.appendLog("Delete completed");
             } else {
                 state.currentStep = "Migration";
