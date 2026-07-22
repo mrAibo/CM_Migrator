@@ -1,0 +1,14 @@
+# CM Migrator WebGUI authentication template
+# Copy to conf/webgui.properties and keep the resulting file untracked.
+
+webgui.auth.enabled=true
+webgui.admin.user=admin
+
+# Preferred for local operation:
+# export WEBGUI_ADMIN_PASSWORD='use-a-long-random-password'
+
+# Alternative: store only a password hash in the local file.
+# Generate it with the AuthHandler utility and paste the result below.
+# webgui.admin.password.hash=
+
+# Never commit webgui.admin.password or a production password hash.
