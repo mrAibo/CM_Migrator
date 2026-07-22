@@ -46,21 +46,30 @@ jobs:
 
       - name: Check committed whitespace
         shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 
+          auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)"
+
+          git_with_auth() {
+            git -c "http.https://github.com/.extraheader=$auth_header" "$@"
+          }
+
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            git diff --check "${{ github.event.pull_request.base.sha }}...${{ github.sha }}"
+            git_with_auth diff --check \
+              "${{ github.event.pull_request.base.sha }}...${{ github.sha }}"
           else
             before="${{ github.event.before }}"
             current="${{ github.sha }}"
 
             if [[ -n "$before" && "$before" != "0000000000000000000000000000000000000000" ]] \
-                && git cat-file -e "$before^{commit}" 2>/dev/null; then
-              git diff --check "$before...$current"
+                && git_with_auth cat-file -e "$before^{commit}" 2>/dev/null; then
+              git_with_auth diff --check "$before...$current"
             elif git rev-parse --verify "$current^" >/dev/null 2>&1; then
-              git diff --check "$current^...$current"
+              git_with_auth diff --check "$current^...$current"
             else
-              git show --check --format= "$current"
+              git_with_auth show --check --format= "$current"
             fi
           fi
