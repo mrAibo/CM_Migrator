@@ -1,0 +1,149 @@
+<!DOCTYPE html><html lang='de'><head><meta charset='UTF-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1'>
+<title>Migration Control</title>
+<style>@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400;700&display=swap');
+:root{--bg:#f6f7fb;--panel:#ffffff;--panel2:#fbfbfe;--border:#e6e8f0;--text:#0f172a;--muted:#667085;--shadow:0 12px 30px rgba(15,23,42,.08);--accent:#ef4444;--accentSoft:#fee2e2;--ok:#16a34a;--warn:#f97316;--bad:#ef4444;}
+.text-success {color:var(--ok)} .text-error {color:var(--bad)} .text-warning {color:var(--warn)} .text-muted {color:var(--muted)}
+*{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,system-ui,Segoe UI,Arial,sans-serif;}
+.wrap{max-width:1200px;margin:28px auto;padding:0 18px;}
+.top{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:18px;}
+.title{display:flex;gap:12px;align-items:flex-start}
+.icon{width:34px;height:34px;border-radius:10px;background:var(--accentSoft);display:flex;align-items:center;justify-content:center;border:1px solid var(--border)}
+.icon span{font-size:18px;color:var(--accent)}
+h1{font-size:18px;margin:0;font-weight:700;letter-spacing:.2px}
+.subtitle{margin-top:4px;font-size:12px;color:var(--muted)}
+.badgeRow{display:flex;align-items:center;gap:10px}
+.badge{background:var(--accent);color:#fff;padding:6px 10px;border-radius:999px;font-size:12px;font-weight:700;letter-spacing:.3px}
+.clock{font-family:JetBrains Mono,monospace;color:var(--muted);font-size:12px;margin-top:6px;text-align:right}
+.stack{display:flex;flex-direction:column;gap:14px}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:16px;box-shadow:var(--shadow);padding:16px}
+.card h3{margin:0 0 10px 0;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.12em}
+.stat-card{background:var(--panel);border:1px solid var(--border);border-radius:16px;box-shadow:var(--shadow);padding:12px 16px;margin-bottom:18px;display:flex;justify-content:space-between;align-items:center;gap:12px}
+.stat-label{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.12em;font-weight:700}
+.stat-value{font-family:JetBrains Mono,monospace;font-weight:800;color:var(--text);text-align:right}
+.stat-value small{font-size:11px;color:var(--muted);font-weight:600}
+.metric{display:flex;justify-content:space-between;align-items:flex-end;gap:10px}
+.metric .val{font-size:28px;font-weight:800;line-height:1}
+.metric .sub{font-size:12px;color:var(--muted);margin-top:6px}
+.bar{height:8px;background:#eef2ff;border-radius:999px;overflow:hidden;margin-top:12px;border:1px solid var(--border)}
+.bar > div{height:100%;background:var(--accent);width:0.0%;}
+.gauge{display:flex;align-items:center;justify-content:center;min-height:380px}
+.gWrap{position:relative;width:340px;height:340px;background:linear-gradient(180deg,#ffffff 0%, #fbfbfe 100%);border:1px solid var(--border);border-radius:22px;box-shadow:var(--shadow);display:flex;align-items:center;justify-content:center}
+.gSvg{width:320px;height:320px;transform:rotate(-90deg)}
+.gBg{fill:none;stroke:#e9edf7;stroke-width:16}
+.gFill{fill:none;stroke:var(--accent);stroke-width:16;stroke-linecap:round;stroke-dasharray:753.9822368615503;stroke-dashoffset:753.9822368615503;transition:stroke-dashoffset 1s ease;filter:drop-shadow(0 6px 14px rgba(249,115,22,.25));}
+.gText{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.gVal{font-size:54px;font-weight:900;letter-spacing:-.02em}
+.gLab{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.16em;margin-top:6px}
+.gSmall{display:flex;gap:18px;margin-top:16px;color:var(--muted);font-size:12px}
+.pill{background:var(--panel);border:1px solid var(--border);padding:8px 10px;border-radius:12px;box-shadow:0 8px 18px rgba(15,23,42,.06)}
+.pill b{color:var(--text)}
+.kv{display:grid;grid-template-columns:1fr;gap:10px}
+.kvRow{display:flex;justify-content:space-between;gap:12px;padding:10px 12px;border:1px solid var(--border);border-radius:14px;background:var(--panel2)}
+.kvRow .k{color:var(--muted);font-size:12px}
+.kvRow .v{font-weight:700;font-size:12px;text-align:right;max-width:220px;word-break:break-word}
+.kvRow .v.mono{font-family:JetBrains Mono,monospace;font-weight:700}
+.logs{margin-top:18px;background:var(--panel);border:1px solid var(--border);border-radius:16px;box-shadow:var(--shadow);padding:14px}
+.logsHeader{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.logsHeader span{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.12em}
+.logsBody{font-family:JetBrains Mono,monospace;font-size:12px;line-height:1.55;background:#0b1220;color:#e5e7eb;border-radius:12px;padding:12px;height:170px;overflow:auto;border:1px solid rgba(255,255,255,.06)}
+.tagP{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700;margin-right:8px;background:rgba(255,255,255,.08);color:#fff}
+.tNet{background:rgba(34,197,94,.18);color:#86efac}
+.tPool{background:rgba(59,130,246,.18);color:#93c5fd}
+.tSys{background:rgba(249,115,22,.18);color:#fdba74}
+.tData{background:rgba(168,85,247,.18);color:#e9d5ff}
+.stats-grid{display:grid;grid-template-columns:320px 1fr 320px;gap:18px;align-items:start}
+@media (max-width: 1100px){.stats-grid{grid-template-columns:1fr}.gauge{order:-1}}
+</style></head><body>
+<div class='wrap'>
+  <div class='top'>
+    <div class='title'>
+      <div class='icon'><span>⛁</span></div>
+      <div>
+        <h1>Migration Control</h1>
+        <div class='subtitle'>AOKHB-ITU → </div>
+      </div>
+    </div>
+    <div>
+      <div class='badgeRow'><div class='badge'>DELETE</div></div>
+      <div class='clock'>15:28:21</div>
+    </div>
+  </div>
+  <div class='stat-card'>
+    <div class='stat-label'>Avg Timing (Retrieve/Copy/Add)</div>
+    <div class='stat-value' style='font-size: 1.2rem;'>20,3 / 157,9 / 60,0 <small>ms</small></div>
+  </div>
+
+<div class='stats-grid'>
+    <div class='stack'>
+      <div class='card'>
+        <h3>Processed</h3>
+        <div class='metric'><div><div class='val'>0</div><div class='sub'>of 0 items</div></div></div>
+        <div class='bar'><div style='width:0.0000%;background:#ef4444;height:100%;border-radius:999px'></div></div>
+      </div>
+      <div class='card'>
+        <h3>Success</h3>
+        <div class='metric'><div><div class='val text-success'>0</div><div class='sub'>0,00% success rate</div></div></div>
+        <div class='bar'><div style='width:0.0000%;background:var(--ok);height:100%;border-radius:999px'></div></div>
+      </div>
+      <div class='card'>
+        <h3>Failed</h3>
+        <div class='metric'><div><div class='val text-error'>0</div><div class='sub'>Review required</div></div></div>
+        <div class='bar'><div style='width:0.0000%;background:var(--bad);height:100%;border-radius:999px'></div></div>
+      </div>
+      <div class='card'>
+        <h3>Deleted</h3>
+        <div class='metric'><div><div class='val text-muted'>0</div><div class='sub'>Cascade deletes</div></div></div>
+        <div class='bar'><div style='width:0.0000%;background:var(--muted);height:100%;border-radius:999px'></div></div>
+      </div>
+      <div class='card'>
+        <h3>Speed</h3>
+        <div class='metric'><div><div class='val'>0,0</div><div class='sub'>items/s current · avg 0,0</div></div></div>
+      </div>
+    </div>
+    <div class='gauge'>
+      <div class='gWrap'>
+        <svg class='gSvg' viewBox='0 0 300 300'><circle class='gBg' cx='150' cy='150' r='120' /><circle class='gFill' cx='150' cy='150' r='120' style='stroke:#ef4444;stroke-dasharray:753.9822;stroke-dashoffset:753.9822;' /></svg>
+        <div class='gText'>
+          <div class='gVal'>0.0%</div>
+          <div class='gLab'>Complete</div>
+          <div class='gSmall'><div class='pill'>Elapsed<br><b>05s</b></div><div class='pill'>Remaining<br><b>--:--</b></div></div>
+        </div>
+      </div>
+    </div>
+    <div class='stack'>
+      <div class='card'>
+        <h3>System connection</h3>
+        <div class='kv'>
+          <div class='kvRow'><div class='k'>Source</div><div class='v mono'>AOKHB-ITU</div></div>
+          <div class='kvRow'><div class='k'>Target</div><div class='v mono'></div></div>
+          <div class='kvRow'><div class='k'>Item type</div><div class='v mono'>FFEPDM_DOC_99</div></div>
+        </div>
+      </div>
+      <div class='card' style='border-color:var(--border);border-width:2px'>
+        <h3 style='display:flex;justify-content:space-between;align-items:center'>Pool metrics
+<span style='background:var(--ok);color:#fff;padding:2px 8px;border-radius:99px;font-size:10px'>● HEALTHY</span>
+</h3>
+        <div class='kv'>
+          <div class='kvRow'><div class='k'>Source wait</div><div class='v mono text-success'>0,0 ms</div></div>
+          <div class='kvRow'><div class='k'>Dest wait</div><div class='v mono text-success'>0,0 ms</div></div>
+          <div class='kvRow'><div class='k'>Refill failures</div><div class='v mono text-success'>0</div></div>
+          <div class='kvRow'><div class='k'>Reconnect failures</div><div class='v mono text-success'>0</div></div>
+          <div class='kvRow'><div class='k'>Refill ok / attempts</div><div class='v mono'>0 / 0</div></div>
+          <div class='kvRow'><div class='k'>Reconnect ok / attempts</div><div class='v mono'>0 / 0</div></div>
+          <div class='kvRow'><div class='k'>Borrow count S / D</div><div class='v mono'>0 / 0</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class='logs'>
+    <div class='logsHeader'><span>System status stream</span><span>0 / 0</span></div>
+    <div class='logsBody'><div><span class='tagP tNet'>NET</span>Link stable: AOKHB-ITU → </div><div><span class='tagP tSys'>SYSTEM</span>Mode: DELETION (PID 60115)</div><div><span class='tagP tPool'>POOL</span>avgWait(ms) S=0,0 D=0,0, refillFail=0, reconnFail=0</div><div><span class='tagP tData'>DATA</span>Item type mapping: FFEPDM_DOC_99</div><div><span class='tagP tSys'>SYSTEM</span>Elapsed: 05s, Remaining: --:--</div></div>
+  </div>
+</div>
+<script>
+setInterval(() => {
+  window.location.reload();
+}, 2000);
+</script>
+</body></html>
