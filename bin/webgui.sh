@@ -9,7 +9,10 @@
 #   ./bin/webgui.sh --port 9000  # Alternativer Port
 #
 # Environment:
-#   CM_JAVA_OPTS   additional JVM flags (e.g. -Dcm.migrator.webgui.bindAll=true)
+#   CM_JAVA_OPTS             additional JVM flags (e.g. -Dcm.migrator.webgui.bindAll=true)
+#   WEBGUI_ADMIN_USER        admin user fallback
+#   WEBGUI_ADMIN_PASSWORD    preferred plaintext password source; never logged
+# Authentication enabled without a user and password/valid hash fails closed.
 # =============================================================================
 
 set -e
