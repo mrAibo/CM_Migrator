@@ -1,6 +1,7 @@
 # Abschlussbericht: Security-Baseline und P0-Integration
 
 > GitHub: [Draft-PR #1](https://github.com/mrAibo/CM_Migrator/pull/1)
+> Integration-Readiness: [Draft-PR #6](https://github.com/mrAibo/CM_Migrator/pull/6)
 > Urteil: **Draft beibehalten; nicht nach `main` mergen, bis die dokumentierten Readiness-Blocker geschlossen sind.**
 
 ## Status
@@ -95,7 +96,7 @@ Der redaktionssichere Scan wurde abgeschlossen; Werte wurden nicht veröffentlic
 - `conf/cmlog/connectors/dklog.log`
 - weitere bereits ignorierte Laufreports, Debug-Mails, Statusseiten, Source-/Script-Backups, das generierte JAR und der historische Signing-Keystore
 
-Erhalten beziehungsweise neu erstellt wurden neutrale Vorlagen für Migration, WebGUI, `cmbcmenv.properties`, `cmbicmsrvs.ini` und optional `ibmcmconfig.properties`. `test-tracked-config-hygiene.sh` verhindert die erneute Aufnahme ignorierter lokaler Dateien und prüft leere sensible Templatefelder.
+Erhalten beziehungsweise neu erstellt wurden neutrale Vorlagen für Migration, WebGUI, `cmbcmenv.properties`, `cmbicmsrvs.ini` und optional `ibmcmconfig.properties`. Der Schemaabgleich bestätigte, dass der kanonische Schlüssel `FILTER_PREDICATE` die historische Form `FILTERPREDICATE` abdeckt. `test-tracked-config-hygiene.sh` verhindert die erneute Aufnahme ignorierter lokaler Dateien und prüft leere sensible Templatefelder.
 
 ### 2. WebGUI-Authentifizierung
 
@@ -115,7 +116,7 @@ Java-Tri-State ist implementiert. Kommentare und Fehlermeldung beschreiben den L
 
 ### 6. Dependency-freie CI
 
-`.github/workflows/test.yml` nutzt minimale Read-only-Rechte, Ubuntu, Temurin 17 und offizielle GitHub-Actions. Ein Sparse-Checkout materialisiert `lib/` nicht. Shell-Syntax, Diff-Check und IBM-unabhängige Tests laufen in CI; ein IBM-abhängiger grüner Build wird nicht vorgetäuscht.
+`.github/workflows/test.yml` nutzt minimale Read-only-Rechte, Ubuntu, Temurin 17 und offizielle GitHub-Actions. Ein Sparse-Checkout materialisiert `lib/` nicht. Shell-Syntax, der committed PR-/Push-Diff und IBM-unabhängige Tests laufen in CI; ein IBM-abhängiger grüner Build wird nicht vorgetäuscht.
 
 ## Weiterhin offene Blocker / Abnahmen
 
