@@ -1,0 +1,59 @@
+# Build output
+build/
+target/
+*.class
+compile.log
+bin/cm-migrator.jar
+
+# Local Java runtimes
+java_env/
+
+# Runtime data and generated output
+data/
+logs/
+*.log
+conf/cmlog/
+debug_mail/
+status.html
+migration_report.html
+verification_report.html
+deletion_report.html
+migration_plan.html
+
+# Generated reports; keep only reusable templates
+reports/*
+!reports/templates/
+!reports/templates/**
+
+# Local configuration and credentials
+conf/migration.properties
+conf/webgui.properties
+conf/cmbicmenv.ini
+conf/*.local.properties
+.env
+.env.*
+!.env.example
+
+# Keys and signing material
+*.keystore
+*.jks
+*.p12
+*.pfx
+*.pem
+*.key
+
+# Editor and OS files
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+
+# Local backup files are not version control
+*.bak
+*.bac
+*.backup
+*.orig
+*.rej
+*.pre-round*
+*.java.a
