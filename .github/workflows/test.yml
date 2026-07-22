@@ -1,0 +1,48 @@
+name: Dependency-free security checks
+
+on:
+  pull_request:
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out without proprietary libraries
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          filter: blob:none
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /*
+            !/lib/
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Verify proprietary libraries are absent
+        run: test ! -d lib
+
+      - name: Check shell syntax
+        run: bash -n bin/*.sh tests/*.sh
+
+      - name: Run dependency-free security tests
+        run: |
+          bash tests/test-cascade-delete-guard.sh
+          bash tests/test-source-lookup-classifier.sh
+          bash tests/test-worker-failure-state.sh
+          bash tests/test-webgui-auth-fail-closed.sh
+          bash tests/test-webgui-delete-lifecycle.sh
+          bash tests/test-tracked-config-hygiene.sh
+
+      - name: Check whitespace
+        run: git diff --check

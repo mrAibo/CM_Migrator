@@ -9,7 +9,9 @@ trap 'rm -rf "$work_dir"' EXIT
 javac_cmd="${JAVAC_CMD:-javac}"
 java_cmd="${JAVA_CMD:-java}"
 
-"$javac_cmd" -d "$work_dir" -cp "lib/*" \
+"$javac_cmd" -d "$work_dir" \
+    tests/stubs/org/apache/logging/log4j/Logger.java \
+    tests/stubs/org/apache/logging/log4j/LogManager.java \
     src/com/ibm/ecm/migration/AuthHandler.java \
     tests/java/com/ibm/ecm/migration/AuthHandlerConfigurationTest.java
 
