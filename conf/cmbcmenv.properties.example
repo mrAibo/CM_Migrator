@@ -1,0 +1,15 @@
+# IBM Content Manager Java API environment template
+# Copy to conf/cmbcmenv.properties and keep the resulting file untracked.
+# Adapt paths and values to the approved IBM CM installation.
+
+CMB.LOG.PROPERTIES_FILE=cmblogconfig.properties
+CMB.TRACE.ENABLED=false
+CMB.TRACE.LEVEL=0
+CMB.SERVERS.FILE=conf/cmbicmsrvs.ini
+CMB.CONNECTION.TIMEOUT=30000
+CMB.CONNECTION.RETRY=3
+CMB.CACHE.ENABLED=true
+CMB.CACHE.SIZE=1000
+CMB.ENCODING=UTF-8
+CMCFGDIR=
+CMWorkingDirectory=

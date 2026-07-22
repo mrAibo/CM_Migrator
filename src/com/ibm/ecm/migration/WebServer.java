@@ -141,14 +141,12 @@ public class WebServer {
         } else {
             addr = new InetSocketAddress("127.0.0.1", port);
         }
+        Properties authConfig = loadAuthConfig();
+        AuthHandler.validateConfiguration(authConfig);
+
         server = HttpServer.create(addr, 0);
         executor = Executors.newFixedThreadPool(10);
         server.setExecutor(executor);
-
-        // Lade Authentifizierungskonfig
-        Properties authConfig = loadAuthConfig();
-        boolean authEnabled = "true".equalsIgnoreCase(authConfig.getProperty("webgui.auth.enabled", "true"));
-        String adminUser = authConfig.getProperty("webgui.admin.user", System.getenv("WEBGUI_ADMIN_USER"));
 
         // Statische file Routen (GESCHÜTZT - braucht Auth für Dashboard)
         server.createContext("/", new AuthHandler(new StaticFileHandler(), authConfig));
@@ -558,7 +556,7 @@ public class WebServer {
             } else if ("delete".equals(mode)) {
                 state.currentStep = "Delete";
                 state.appendLog("Delete started");
-                Main.main(new String[]{runConfigFile});
+                Main.startMigration(runConfigFile);
                 state.appendLog("Delete completed");
             } else {
                 state.currentStep = "Migration";

@@ -1,18 +1,18 @@
 # Abschlussbericht: Security-Baseline und P0-Integration
 
 > GitHub: [Draft-PR #1](https://github.com/mrAibo/CM_Migrator/pull/1)
+> Integration-Readiness: [Draft-PR #6](https://github.com/mrAibo/CM_Migrator/pull/6)
 > Urteil: **Draft beibehalten; nicht nach `main` mergen, bis die dokumentierten Readiness-Blocker geschlossen sind.**
 
 ## Status
 
 **Draft — nicht mergen.** Dieser PR bündelt die Security-Baseline und die drei gestapelten P0-Hardening-PRs für die abschließende Prüfung gegen `main`.
 
-- Base: `main` (`e95c5bd5a7fb1abcef7c4b0876bb2ced1a1bb1e1`)
-- Geprüfter Funktionsstand: `4c6c87df2cb4ab4af1cf2d80b719dcc83c0683b2`
-- Berichtsbranch: `hardening/security-baseline`
-- Geprüfter Funktionsumfang vor den reinen Doku-Commits dieses Berichts: 46 Commits, 31 Dateien, +2238/−136
-- `main` ist direkter Vorfahr; es gibt 0 `main`-only Commits.
-- Synthetischer Merge-Tree: konfliktfrei.
+- Ziel-Base dieses Readiness-PRs: `hardening/security-baseline` (`f2467420a42372021647387ee8f28f858dab936f`)
+- Arbeitsbranch: `hardening/integration-readiness`
+- Ausgangs-HEAD: `f2467420a42372021647387ee8f28f858dab936f`
+- PR #1 bleibt Draft und wird durch diese Arbeit weder gemergt noch nach `main` weitergeführt.
+- Der genaue End-HEAD wird im externen Abschlussbericht/PR festgehalten; dieses Dokument beschreibt den Inhalt des Branch-Tips.
 
 ## Reviewgrundlage
 
@@ -20,7 +20,7 @@
 - unabhängiger Read-only-Security-/Config-Review
 - unabhängiger Read-only-Runtime-/Integrationsreview
 - redaktionssicherer Scan der getrackten Konfigurationsdateien; keine Werte wurden veröffentlicht
-- lokale Build-, Java-11-, Shell-, Diff-, Apply- und Regressionstest-Matrix
+- lokale Build-, Java-17-, Shell-, Diff- und Regressionstest-Matrix sowie Sparse-Checkout-CI-Simulation
 
 ## Integrierte Änderungen
 
@@ -52,103 +52,116 @@
 - Fehler wird nach geordnetem Cleanup an den Main-Thread weitergereicht und führt im CLI-Pfad zu Exit-Code 1
 - Merge-Commit: `4c6c87df2cb4ab4af1cf2d80b719dcc83c0683b2`
 
+### Integration-Readiness — dieser Branch
+
+- reale Environment-Configs, Backups, Laufzeit-/Reportartefakte, Source-Backups, generiertes JAR und historischer Keystore aus dem Tracking entfernt; lokale Operator-Dateien blieben erhalten
+- neutrale, loadergerechte `.example`-Dateien und erweiterte Ignore-/Hygiene-Regeln
+- WebGUI-Auth fail-closed vor Port-Bind; keine Passwortgenerierung oder Secret-Ausgabe
+- WebGUI-Delete nutzt `Main.startMigration()`; Fehler werden als `FAILED` behandelt, die WebGUI-JVM bleibt aktiv
+- einmalige Worker-Patch-/Apply-Artefakte samt ausschließlich dazugehörigen Tests entfernt
+- Guard-Texte an den implementierten Tri-State angepasst; konservatives Blockieren bleibt unverändert
+- read-only GitHub-CI für IBM-unabhängige Tests; IBM-Build bleibt lokales/privates Gate
+
 ## Vollständige Testmatrix
 
 | Prüfung | Ergebnis |
 |---|---|
-| `git merge-tree --write-tree origin/main origin/hardening/security-baseline` | PASS, konfliktfrei |
-| `git diff --check origin/main...HEAD` | PASS |
-| geänderte Textdateien auf gemischte Zeilenenden | PASS; LF/CRLF jeweils konsistent |
-| `bash -n` über alle 17 getrackten Shell-Skripte | PASS |
+| `bash -n bin/*.sh tests/*.sh` | PASS |
+| `git diff --check` | PASS |
 | `tests/test-cascade-delete-guard.sh` | PASS |
 | `tests/test-source-lookup-classifier.sh` | PASS |
-| `tests/test-verifier-source-lookup-decision.sh` | PASS |
-| `tests/test-worker-failure-apply-script.sh` | PASS |
-| `tests/test-worker-failure-patch.sh` | PASS |
+| `tests/test-verifier-source-lookup-decision.sh` | PASS, lokal mit vorhandenen Libraries |
 | `tests/test-worker-failure-state.sh` | PASS |
-| Apply-Skript gegen ursprünglichen Stand `f597800` | PASS |
-| `bash bin/compile.sh` | PASS: 34 Quellen, 79 Klassen |
-| `javac --release 11 ...` | PASS |
-| finaler Arbeitsbaum am geprüften Funktionsstand | sauber |
+| `tests/test-webgui-auth-fail-closed.sh` | PASS, ohne `lib/*` |
+| `tests/test-webgui-delete-lifecycle.sh` | PASS |
+| `tests/test-tracked-config-hygiene.sh` | PASS |
+| `bash bin/compile.sh` mit Temurin 17 | PASS, lokaler/privater IBM-Library-Build |
+| Sparse-Checkout-Simulation ohne materialisiertes `lib/` | PASS |
 
-## Readiness-Blocker / offene Risiken
+Die GitHub-CI führt nur die IBM-unabhängigen Tests aus. `test-verifier-source-lookup-decision.sh`, Gesamtbuild, JNI- und IBM-CM-Verbindungstests bleiben bewusst außerhalb des Hosted Runners. Lokale Tests ersetzen keinen IBM-CM-Live-E2E-Test.
 
-### 1. IBM-CM-Live-E2E fehlt
+## Lokal geschlossene Readiness-Blocker
 
-Vor „Ready for review“ müssen auf einem echten IBM-CM-System mindestens geprüft werden:
+### 1. Getrackte Konfigurationen und Laufzeitartefakte
 
-- existierendes Source-Objekt → `EXISTS`
-- sicher gelöschtes Source-Objekt mit realer SDK-Exception-Chain → `NOT_FOUND`
-- Authentifizierungs-, Netzwerk-, Timeout- und Berechtigungsfehler → `ERROR`
-- bei `ERROR` darf kein Destination-Delete erfolgen
-- Worker-/Discovery-Fehler müssen Cleanup auslösen, Abschlussreports/E-Mail überspringen und im CLI-Pfad Exit-Code 1 liefern
-
-Der Launcher-Guard bleibt bis dahin absichtlich strenger als der neue Java-Tri-State und verweigert `CASCADE_DELETE_ON_MISSING=true` vollständig. Dadurch bleibt die nun fail-closed implementierte Cascade-Funktion über die offiziell unterstützten Launcher vorerst unerreichbar.
-
-### 2. Keine GitHub-CI-Checks
-
-Für den geprüften Funktionsstand existieren:
-
-- 0 Status-Contexts
-- 0 Check-Runs
-
-Die lokale Matrix ist grün, ersetzt aber keine reproduzierbare CI-Ausführung.
-
-### 3. Bereits in `main` getrackte Config-/Backup-Dateien
-
-Ein redaktionssicherer Scan fand weitere, durch diesen Branch **nicht neu eingeführte**, getrackte Dateien mit nichtleeren credential-/hostartigen Feldern, unter anderem:
+Der redaktionssichere Scan wurde abgeschlossen; Werte wurden nicht veröffentlicht. Aus dem Tracking entfernt wurden insbesondere:
 
 - `conf/delete_sandbox_archive.properties`
 - `conf/migration.properties.bak`
-- `conf/migration.properties.example`
 - `conf/migration_FFCPDM_PRI_01_T200_S3.properties`
 - `conf/migration_test_to_sandbox.properties`
 - `conf/cmbicmsrvs.ini`
 - `conf/ibmcmconfig.properties`
+- `conf/cmbicmenv.properties` und dessen Backup
+- `conf/cmlog/connectors/dklog.log`
+- weitere bereits ignorierte Laufreports, Debug-Mails, Statusseiten, Source-/Script-Backups, das generierte JAR und der historische Signing-Keystore
 
-Die Werte wurden im Review nicht offengelegt. Vor „Ready for review“ muss der Owner sie als Platzhalter oder echte/reversible Credentials beziehungsweise interne Produktionsdaten klassifizieren, gegebenenfalls rotieren und aus dem Tracking entfernen. `.gitignore` entfernt bereits getrackte Dateien nicht.
+Erhalten beziehungsweise neu erstellt wurden neutrale Vorlagen für Migration, WebGUI, `cmbcmenv.properties`, `cmbicmsrvs.ini` und optional `ibmcmconfig.properties`. Der Schemaabgleich bestätigte, dass der kanonische Schlüssel `FILTER_PREDICATE` die historische Form `FILTERPREDICATE` abdeckt. `test-tracked-config-hygiene.sh` verhindert die erneute Aufnahme ignorierter lokaler Dateien und prüft leere sensible Templatefelder.
 
-Das ist konkret sichtbar: `conf/cmbicmenv.properties.bac`, `conf/cmlog/connectors/dklog.log` und `conf/migration.properties.bak` werden von den neuen Ignore-Regeln getroffen, bleiben aber weiterhin getrackt. Dadurch ist auch die README-Aussage, `conf/` enthalte nur Templates beziehungsweise nicht geheime Konfiguration, noch nicht vollständig erfüllt.
+### 2. WebGUI-Authentifizierung
 
-Die neue WebGUI-Vorlage aktiviert Authentifizierung und setzt einen Admin-Benutzer, aber kein Passwort. Im bestehenden `AuthHandler` erzeugt dieser Pfad ein temporäres Passwort und schreibt es auf Warn-Level ins Log. Vor Freigabe muss entschieden werden, ob dieses Bootstrap-Verhalten betrieblich akzeptiert oder durch einen fail-closed Startfehler ersetzt wird.
+Bei aktivierter Authentifizierung führen fehlender Benutzer, fehlende Credentials, ein ungültiger Auth-Schalter oder ein ungültiger SHA-256-Hex-Hash nun vor dem Port-Bind zum Startfehler. Es wird kein Passwort generiert oder geloggt; Fehlertexte enthalten keinen eingegebenen Secretwert. Explizit konfigurierte Passwort-/Hash-Pfade bleiben erhalten, Klartext über `WEBGUI_ADMIN_PASSWORD` ist bevorzugt. SHA-256 bleibt ungesalzen und nur Legacy-Kompatibilität.
 
-### 4. Git-Historie und Rotation
+### 3. WebGUI-Delete-Lifecycle
 
-Das Entfernen aus dem Branch-Tip löscht veröffentlichte Werte nicht aus der Git-Historie. Betroffene Credentials müssen unabhängig rotiert und historische Blobs in einer separat koordinierten History-Rewrite-Aktion bereinigt werden.
+Der Delete-Zweig ruft nicht mehr `Main.main()`, sondern den vorhandenen exception-basierten `Main.startMigration()`-Kern auf. `runOperation()` fängt Fehler ab, markiert den Run `FAILED` und lässt die WebGUI-JVM weiterlaufen. Der CLI-Pfad behält sein Exit-1-Verhalten.
 
-### 5. WebGUI-Delete-Aufrufer
+### 4. Worker-Patch-/Apply-Artefakte
 
-`WebServer.runOperation()` verwendet für `safe`/`migration` korrekt `Main.startMigration()`, ruft im `delete`-Pfad aber weiterhin `Main.main()` auf. Eine jetzt propagierte Worker-Ausnahme kann dadurch `System.exit(1)` auslösen und die gesamte WebGUI-JVM beenden, statt den Run kontrolliert als `FAILED` zu markieren. Vor „Ready for review“ muss dieser Pfad auf einem Testsystem bestätigt oder minimal auf den exception-basierten Aufruf umgestellt werden.
+Patch, Python-/Shell-Applier und ihre zwei reinen Integrationshilfstests wurden entfernt. Die integrierte Produktionslogik und `test-worker-failure-state.sh` bleiben erhalten. Es werden nicht zwei Implementierungsvarianten parallel gepflegt.
 
-### 6. Worker-Patch-Artefakt
+### 5. Cascade-Guard-Texte
 
-`patches/p0-worker-failure-propagation.patch` ist kein gültiger `git apply`-Patch (`git apply --check` endet mit Exit 128 bei Zeile 4) und beschreibt außerdem eine ältere Implementierungsvariante mit `workerFailures` statt des aktuellen `workerFailureState`. Der vorhandene Patch-Test prüft nur Textfragmente und erkennt diese Abweichung nicht. Der Python-Applier wurde separat erfolgreich und idempotent geprüft; das veraltete Patch-Artefakt muss vor Freigabe entfernt, regeneriert oder klar als nicht ausführbare Dokumentation gekennzeichnet werden.
+Java-Tri-State ist implementiert. Kommentare und Fehlermeldung beschreiben den Launcher-Guard nun als bewusstes temporäres betriebliches Containment. Sein Verhalten ist unverändert: jede aktivierte Cascade-Delete-Konfiguration bleibt bis IBM-Live-Abnahme und ausdrücklicher Freigabe blockiert.
+
+### 6. Dependency-freie CI
+
+`.github/workflows/test.yml` nutzt minimale Read-only-Rechte, Ubuntu, Temurin 17 und offizielle GitHub-Actions. Ein Sparse-Checkout materialisiert `lib/` nicht. Shell-Syntax, der committed PR-/Push-Diff und IBM-unabhängige Tests laufen in CI; ein IBM-abhängiger grüner Build wird nicht vorgetäuscht.
+
+## Weiterhin offene Blocker / Abnahmen
+
+### 1. IBM-CM-Live-E2E
+
+Auf einem echten, isolierten IBM-CM-System bleiben mindestens `EXISTS`, bestätigtes `NOT_FOUND`, Auth-/Netz-/Timeout-/Berechtigungsfehler als `ERROR`, Delete-Berechtigung, Worker-Cleanup und WebGUI-Delete-Lifecycle abzunehmen. Bei `ERROR` darf kein Destination-Delete erfolgen. Der Launcher-Guard blockiert Cascade Delete bis dahin vollständig.
+
+### 2. Credential-Rotation
+
+Möglicherweise bereits veröffentlichte Credentials, interne Endpunkte und Signing-Werte sind unabhängig von der Branch-Tip-Bereinigung zu rotieren. Das ist nicht durch Entfernen aus dem Index erledigt.
+
+### 3. Git-History-Purge
+
+Historische Blobs bleiben erreichbar. Ein History-Rewrite wurde in diesem Auftrag ausdrücklich nicht durchgeführt und muss separat koordiniert werden.
+
+### 4. Produktive Performance-/JNI-Abnahme
+
+Der lokale Build beweist weder JNI-/Native-Library-Kompatibilität noch produktive Kapazität, Latenz oder Stabilität in der Zielumgebung.
+
+### 5. 24h-Timeout-/unbegrenzte-Warte-Policy
+
+Nach dem nominellen Worker-Timeout kann weiter unbegrenzt auf blockierte SDK-Aufrufe gewartet werden. Dafür fehlt weiterhin eine ausdrückliche Betriebsentscheidung.
 
 ## Nicht blockierende Hinweise
 
-- Die Guard-Kommentare/-Fehlermeldung beschreiben noch den Zustand vor dem Tri-State-Fix. Das Laufzeitverhalten ist konservativ korrekt, der Text sollte aber vor Freigabe aktualisiert oder bewusst als temporärer Containment-Hinweis bestätigt werden.
-- `bin/apply-worker-failure-propagation.sh:20` erzeugt ShellCheck `SC2053`, weil die rechte Seite von `!=` unquoted als Pattern behandelt wird; mit den aktuellen Boolean-Literalen ist das Risiko gering.
-- Nach dem nominellen 24-Stunden-Worker-Timeout wartet `Main` absichtlich unbegrenzt auf laufende SDK-Aufrufe. Der Timeout begrenzt damit nicht die Prozesslaufzeit; diese Betriebsentscheidung muss vor Freigabe ausdrücklich akzeptiert werden.
-- Der lokale Build meldet die bestehende Deprecation-Warnung für `OperatingSystemMXBean#getTotalPhysicalMemorySize()`.
-- `/opt/IBM/cm87_api/lib` war lokal nicht vorhanden; kompiliert wurde erfolgreich gegen `lib/*`.
-- Der Verifier-Test meldet eine nicht blockierende Annotation-Processing-Warnung.
+- Der lokale Build kann die bestehende Deprecation-Warnung für `OperatingSystemMXBean#getTotalPhysicalMemorySize()` melden.
+- `/opt/IBM/cm87_api/lib` war lokal nicht vorhanden; gebaut wurde gegen die vorhandenen, nicht für Hosted CI verwendeten `lib/*`.
+- Der Verifier-Test kann eine nicht blockierende Annotation-Processing-Warnung melden.
 
 ## Vor dem Wechsel aus Draft
 
-- [x] vollständiger Diff gegen `main` inventarisiert
-- [x] Stack #2 → #3 → #5 in `hardening/security-baseline` integriert
+- [x] vollständiger Diff und betroffene Callflows inventarisiert
 - [x] lokale Test-/Build-/Diff-Matrix grün
-- [x] Merge-Tree konfliktfrei
+- [x] Config-/Runtime-/Backup-Tracking bereinigt und neutrale Vorlagen vorhanden
+- [x] WebGUI-Auth fail-closed
+- [x] WebGUI-Delete exception-basiert eingebettet
+- [x] veraltete Worker-Patch-/Apply-Artefakte entfernt
+- [x] temporäre Guard-Texte aktualisiert, Guard-Verhalten beibehalten
+- [x] dependency-freier CI-Workflow vorhanden und lokal ohne `lib/` simuliert
 - [ ] IBM-CM-Live-E2E abgeschlossen
-- [ ] GitHub-CI vorhanden und grün oder bewusst formal ersetzt
-- [ ] verbleibende getrackte Config-/Credential-Kandidaten klassifiziert
-- [ ] bereits getrackte Ignore-Treffer und WebGUI-Passwort-Bootstrap bereinigt beziehungsweise akzeptiert
-- [ ] Credential-Rotation und History-Purge koordiniert
-- [ ] WebGUI-Delete-Aufrufer geprüft beziehungsweise korrigiert
-- [ ] ungültiges/veraltetes Worker-Patch-Artefakt bereinigt
+- [ ] Credential-Rotation abgeschlossen
+- [ ] Git-History-Purge koordiniert und abgeschlossen
+- [ ] produktive Performance-/JNI-Abnahme abgeschlossen
 - [ ] 24h-Timeout-/unbegrenzte-Warte-Policy ausdrücklich akzeptiert
-- [ ] temporäre Guard-Texte geprüft
 
 ## Gesamturteil
 
-Der kombinierte Code-Stand ist lokal build- und regressionstestbar, der Merge-Tree ist konfliktfrei und die neue Java-Logik behandelt Source-Lookup-Fehler fail-closed. Der PR ist dennoch nicht mergebereit: IBM-CM-Live-E2E und GitHub-CI fehlen; verbleibende getrackte Credential-/Runtime-Konfigurationen, der WebGUI-Delete-Aufrufer, das ungültige Worker-Patch-Artefakt sowie die temporäre Cascade-Guard-Policy müssen vor Freigabe geklärt werden.
+Die lokal lösbaren Readiness-Blocker dieses Auftrags sind im Branch `hardening/integration-readiness` geschlossen und durch lokale Tests beziehungsweise Strukturtests abgesichert. Der Branch ist **nicht** als produktionsbereit oder mergebereit zu deklarieren: IBM-CM-Live-E2E, Credential-Rotation, Git-History-Purge, produktive Performance-/JNI-Abnahme und die ausdrückliche Timeout-/Warte-Policy-Entscheidung bleiben offen. PR #1 bleibt Draft; weder dieser Branch noch PR #1 werden nach `main` gemergt.

@@ -26,10 +26,12 @@ reports/*
 !reports/templates/**
 
 # Local configuration and credentials
-conf/migration.properties
-conf/webgui.properties
-conf/cmbicmenv.ini
-conf/*.local.properties
+conf/*.properties
+!conf/*.properties.example
+!conf/cmblogconfig.properties
+conf/*.ini
+!conf/*.ini.example
+conf/profiles/
 .env
 .env.*
 !.env.example
@@ -51,7 +53,7 @@ Thumbs.db
 
 # Local backup files are not version control
 *.bak
-*.bac
+*.bac*
 *.backup
 *.orig
 *.rej

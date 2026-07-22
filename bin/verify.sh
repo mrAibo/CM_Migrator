@@ -64,9 +64,9 @@ if [ ! -f "$CONFIG_FILE" ]; then
     exit 1
 fi
 
-# P0 containment: the current Java verifier maps every source lookup exception
-# to "source missing". Refuse destructive verification until the Java lookup
-# returns explicit EXISTS / NOT_FOUND / ERROR states.
+# Operational containment: Java already returns explicit EXISTS / NOT_FOUND /
+# ERROR states, but every enabled cascade delete remains blocked until IBM live
+# acceptance and explicit operational approval.
 # shellcheck source=bin/cascade-delete-guard.sh
 source "bin/cascade-delete-guard.sh"
 assert_cascade_delete_disabled "$CONFIG_FILE"

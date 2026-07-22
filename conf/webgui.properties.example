@@ -4,11 +4,15 @@
 webgui.auth.enabled=true
 webgui.admin.user=admin
 
-# Preferred for local operation:
-# export WEBGUI_ADMIN_PASSWORD='use-a-long-random-password'
+# Preferred: provide the plaintext password only to the WebGUI process.
+# Example without placing the value in this file or in command history:
+#   read -rsp 'WebGUI password: ' WEBGUI_ADMIN_PASSWORD; echo
+#   export WEBGUI_ADMIN_PASSWORD
 
-# Alternative: store only a password hash in the local file.
-# Generate it with the AuthHandler utility and paste the result below.
+# Legacy alternative: a 64-character hexadecimal SHA-256 password hash.
+# SHA-256 here is unsalted legacy compatibility, not a modern password KDF.
 # webgui.admin.password.hash=
 
-# Never commit webgui.admin.password or a production password hash.
+# With authentication enabled, startup fails unless the user and either the
+# environment password/property password or a valid hash are configured.
+# No password is generated, logged, or used to silently disable authentication.

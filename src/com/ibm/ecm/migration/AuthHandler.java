@@ -16,9 +16,11 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Base64;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Pattern;
 
 /**
  * AuthHandler - HTTP Basic Authentication Handler für WebGUI
@@ -35,6 +37,7 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public class AuthHandler implements HttpHandler {
     private static final Logger logger = LogManager.getLogger(AuthHandler.class);
+    private static final Pattern SHA_256_HEX = Pattern.compile("[0-9a-fA-F]{64}");
     
     private final HttpHandler wrappedHandler;
     private final String adminUsername;
@@ -51,44 +54,71 @@ public class AuthHandler implements HttpHandler {
      */
     public AuthHandler(HttpHandler wrappedHandler, Properties config) {
         this.wrappedHandler = wrappedHandler;
-        
-        // Lade Authentifizierungskonfiguration
-        String username = config.getProperty("webgui.admin.user", 
-                                             System.getenv("WEBGUI_ADMIN_USER"));
-        String password = config.getProperty("webgui.admin.password",
-                                             System.getenv("WEBGUI_ADMIN_PASSWORD"));
-        String passwordHash = config.getProperty("webgui.admin.password.hash");
-        String enabled = config.getProperty("webgui.auth.enabled", "true");
-        
-        this.authEnabled = "true".equalsIgnoreCase(enabled) && 
-                          (username != null && !username.isEmpty());
-        
+        validateConfiguration(config);
+
+        this.authEnabled = isAuthEnabled(config);
         if (authEnabled) {
-            this.adminUsername = username;
-            
-            // Verwende Hash wenn vorhanden, sonst hashe das Passwort
-            if (passwordHash != null && !passwordHash.isEmpty()) {
-                this.adminPasswordHash = passwordHash;
-            } else if (password != null && !password.isEmpty()) {
-                this.adminPasswordHash = hashPassword(password);
-                logger.info("WebGUI Admin-Authentifizierung aktiviert für Benutzer: {}", username);
+            this.adminUsername = firstNonBlank(
+                    config.getProperty("webgui.admin.user"),
+                    System.getenv("WEBGUI_ADMIN_USER")).trim();
+
+            String passwordHash = config.getProperty("webgui.admin.password.hash");
+            if (hasText(passwordHash)) {
+                this.adminPasswordHash = passwordHash.trim().toLowerCase(Locale.ROOT);
             } else {
-                // Generiere zufälliges Passwort wenn keins gesetzt
-                String randomPassword = generateRandomPassword();
-                this.adminPasswordHash = hashPassword(randomPassword);
-                logger.warn("======================================================");
-                logger.warn(" WEBGUI ADMIN-PASSWORT NICHT KONFIGURIERT!");
-                logger.warn(" Generiertes temporäres Passwort: {}", randomPassword);
-                logger.warn(" Bitte in migration.properties setzen:");
-                logger.warn("   webgui.admin.user=admin");
-                logger.warn("   webgui.admin.password=IhrSicheresPasswort");
-                logger.warn("======================================================");
+                String password = firstNonBlank(
+                        config.getProperty("webgui.admin.password"),
+                        System.getenv("WEBGUI_ADMIN_PASSWORD"));
+                this.adminPasswordHash = hashPassword(password);
             }
+            logger.info("WebGUI Admin-Authentifizierung aktiviert für Benutzer: {}", adminUsername);
         } else {
             this.adminUsername = null;
             this.adminPasswordHash = null;
-            logger.warn("WebGUI Admin-Authentifizierung ist DEAKTIVIERT!");
+            logger.warn("WebGUI Admin-Authentifizierung ist explizit DEAKTIVIERT!");
         }
+    }
+
+    static void validateConfiguration(Properties config) {
+        Properties effective = config == null ? new Properties() : config;
+        String enabled = effective.getProperty("webgui.auth.enabled", "true").trim();
+        if (!"true".equalsIgnoreCase(enabled) && !"false".equalsIgnoreCase(enabled)) {
+            throw new IllegalStateException("WebGUI authentication setting must be true or false.");
+        }
+        if (!"true".equalsIgnoreCase(enabled)) {
+            return;
+        }
+
+        String username = firstNonBlank(
+                effective.getProperty("webgui.admin.user"),
+                System.getenv("WEBGUI_ADMIN_USER"));
+        if (!hasText(username)) {
+            throw new IllegalStateException("WebGUI authentication is enabled but no admin user is configured.");
+        }
+
+        String passwordHash = effective.getProperty("webgui.admin.password.hash");
+        if (hasText(passwordHash) && !SHA_256_HEX.matcher(passwordHash.trim()).matches()) {
+            throw new IllegalStateException("WebGUI authentication is enabled but the configured password hash is not a valid SHA-256 hex value.");
+        }
+
+        String password = firstNonBlank(
+                effective.getProperty("webgui.admin.password"),
+                System.getenv("WEBGUI_ADMIN_PASSWORD"));
+        if (!hasText(passwordHash) && !hasText(password)) {
+            throw new IllegalStateException("WebGUI authentication is enabled but no admin credential is configured.");
+        }
+    }
+
+    private static boolean isAuthEnabled(Properties config) {
+        return "true".equalsIgnoreCase(config.getProperty("webgui.auth.enabled", "true").trim());
+    }
+
+    private static String firstNonBlank(String first, String second) {
+        return hasText(first) ? first : second;
+    }
+
+    private static boolean hasText(String value) {
+        return value != null && !value.trim().isEmpty();
     }
     
     /**
@@ -199,19 +229,6 @@ public class AuthHandler implements HttpHandler {
         } catch (NoSuchAlgorithmException e) {
             throw new RuntimeException("SHA-256 not available", e);
         }
-    }
-    
-    /**
-     * Generiert ein zufälliges Passwort.
-     */
-    private String generateRandomPassword() {
-        String chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$%";
-        StringBuilder sb = new StringBuilder();
-        java.util.Random random = new java.security.SecureRandom();
-        for (int i = 0; i < 12; i++) {
-            sb.append(chars.charAt(random.nextInt(chars.length())));
-        }
-        return sb.toString();
     }
     
     /**
