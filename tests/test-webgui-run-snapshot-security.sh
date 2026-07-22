@@ -10,15 +10,19 @@ javac_cmd="${JAVAC_CMD:-javac}"
 java_cmd="${JAVA_CMD:-java}"
 secret='SNAPSHOT_SECRET_SENTINEL_9b731'
 
-"$javac_cmd" --release 11 -d "$work_dir" -cp "lib/*" -sourcepath src \
-    src/com/ibm/ecm/migration/RunConfigSnapshot.java \
-    tests/java/com/ibm/ecm/migration/RunConfigSnapshotTest.java
+if [[ -d lib ]]; then
+    "$javac_cmd" --release 11 -d "$work_dir" -cp "lib/*" -sourcepath src \
+        src/com/ibm/ecm/migration/RunConfigSnapshot.java \
+        tests/java/com/ibm/ecm/migration/RunConfigSnapshotTest.java
 
-output="$($java_cmd -cp "$work_dir:lib/*" com.ibm.ecm.migration.RunConfigSnapshotTest 2>&1)"
-printf '%s\n' "$output"
-if [[ "$output" == *"$secret"* ]]; then
-    printf 'FAIL: snapshot secret reached test output/logs\n' >&2
-    exit 1
+    output="$($java_cmd -cp "$work_dir:lib/*" com.ibm.ecm.migration.RunConfigSnapshotTest 2>&1)"
+    printf '%s\n' "$output"
+    if [[ "$output" == *"$secret"* ]]; then
+        printf 'FAIL: snapshot secret reached test output/logs\n' >&2
+        exit 1
+    fi
+else
+    printf 'SKIP: Java runtime test requires lib/ directory (excluded in CI sparse checkout)\n'
 fi
 
 python3 - <<'PY'
