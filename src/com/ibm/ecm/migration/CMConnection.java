@@ -1,0 +1,235 @@
+/*
+ * Projekt: CM Migrator 2.2.1.
+ * @Author: Aleksej Voronin, Sven Lindt
+ * @Date:   26.01.2026
+ */
+package com.ibm.ecm.migration;
+
+import com.ibm.mm.sdk.common.*;
+import com.ibm.mm.sdk.server.*;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.io.File;
+import java.net.URL;
+
+/**
+ * Wrapper für IBM Content Manager Connection (DKDatastoreICM).
+ * Implementiert AutoCloseable für die Verwendung in try-with-resources.
+ */
+public class CMConnection implements AutoCloseable {
+    private static final Logger logger = LogManager.getLogger(CMConnection.class);
+
+    public enum Role {
+        SOURCE,
+        DEST
+    }
+
+    private DKDatastoreICM ds;
+    private final String ssid;
+    private final String username;
+    private final String password;
+    private final Role role; // Added Role for validation
+
+    public CMConnection(String ssid, String username, String password, Role role) {
+        this.ssid = ssid;
+        this.username = username;
+        this.password = password;
+        this.role = role;
+    }
+
+    // Connection Timeout
+    private static final int MAX_USAGE_COUNT = 1000; // Hard limit: Re-create connection after 1000 items
+    private static final long MAX_AGE_MS = 30 * 60 * 1000L; // Hard limit: 30 Minutes
+
+    private long creationTime;
+    private int usageCount;
+
+    // Emergency-Flag (Round 2): markiert Verbindungen, die als Notfall-Fallback außerhalb der
+    // Pool-Kapazität erzeugt wurden. Solche Verbindungen MÜSSEN beim Return geschlossen
+    // werden und dürfen NIE im Pool landen, sonst überschreitet der Pool seine Kapazität.
+    private volatile boolean emergency = false;
+
+    public void markEmergency() { this.emergency = true; }
+
+    public boolean isEmergency() { return this.emergency; }
+
+    // Cache für Tabellennamen, um redundante SDK-Lookups zu vermeiden
+    private static final ConcurrentHashMap<String, String> TABLE_NAME_CACHE = new ConcurrentHashMap<>();
+
+    // Logging-Hygiene (Round 1): DIAG-Block JVM-weit nur einmal, Schema-WARN nur einmal pro ItemType.
+    private static final AtomicBoolean DIAG_LOGGED_ONCE = new AtomicBoolean(false);
+    private static final java.util.Set<String> SCHEMA_WARN_SEEN =
+            java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    public void markUsed() {
+        this.usageCount++;
+    }
+
+    public boolean isStale() {
+        if (usageCount >= MAX_USAGE_COUNT) return true;
+        if (System.currentTimeMillis() - creationTime > MAX_AGE_MS) return true;
+        return false;
+    }
+
+    public void connect() throws Exception {
+        if (isConnected()) {
+            return;
+        }
+
+        // FAIL-FAST: Verhindern Verbindungsversuche mit leerer SSID (sonst kann zu einer falschen Datenbank führen)
+        if (ssid == null || ssid.trim().isEmpty()) {
+             throw new IllegalStateException("FAIL-FAST: SSID is null/empty for Role " + role + ". Refusing connect.");
+        }
+
+        logger.info("Connecting to IBM CM (" + role + "): " + ssid);
+
+        // DIAG-Block (Round 1): nur EINMAL pro JVM und nur wenn DEBUG aktiv ist.
+        // Vermeidet Log-Flut bei MAX_USAGE_COUNT-Reconnects. Once-Flag wird erst gesetzt,
+        // wenn DEBUG eingeschaltet ist – sonst bleibt er false und kann später noch greifen.
+        if (logger.isDebugEnabled() && DIAG_LOGGED_ONCE.compareAndSet(false, true)) {
+            try {
+                File cwd = new File(".");
+                File iniCwd = new File("cmbicmsrvs.ini");
+                File iniConf = new File("conf/cmbicmsrvs.ini");
+                URL envProps = CMConnection.class.getClassLoader().getResource("cmbcmenv.properties");
+                URL serversIniRes = CMConnection.class.getClassLoader().getResource("cmbicmsrvs.ini");
+                logger.debug("DIAG: user.dir='{}'", System.getProperty("user.dir"));
+                logger.debug("DIAG: cwd='{}'", cwd.getAbsolutePath());
+                logger.debug("DIAG: iniCwd exists={} path='{}'", iniCwd.exists(), iniCwd.getAbsolutePath());
+                logger.debug("DIAG: iniConf exists={} path='{}'", iniConf.exists(), iniConf.getAbsolutePath());
+                logger.debug("DIAG: classpath resource cmbcmenv.properties={}", envProps);
+                logger.debug("DIAG: classpath resource cmbicmsrvs.ini={}", serversIniRes);
+            } catch (Exception diagEx) {
+                logger.warn("DIAG: Failed to collect ini resolution diagnostics", diagEx);
+            }
+        }
+
+        // Wird im error-Pfad unten referenziert, deshalb außerhalb des Debug-Guards deklariert.
+        String debugUser = (username == null) ? "NULL" : "'" + username + "'";
+        if (logger.isDebugEnabled()) {
+            int pwLength = (password == null) ? 0 : password.length();
+            logger.debug("DKDatastoreICM.connect() -> SSID: {}, User: {}, PW-Length: {}", ssid, debugUser, pwLength);
+        }
+
+        try {
+            ds = new DKDatastoreICM();
+            ds.connect(ssid, username, password, "");
+
+            // AGING: Reset counters
+            this.creationTime = System.currentTimeMillis();
+            this.usageCount = 0;
+
+            logger.info("Successfully connected to " + ssid + " as " + role);
+        } catch (Exception e) {
+            logger.error("Failed to connect to " + ssid + " with User " + debugUser, e);
+            // ROBUST CLEANUP: Wenn die Verbindung fehlschlägt, fehlgeschlagene Objekt löschen.
+            if (ds != null) {
+                try {
+                    ds.destroy();
+                } catch (Exception destroyEx) {
+                }
+                ds = null;
+            }
+            throw e; 
+        }
+    }
+
+    public void disconnect() {
+        if (ds != null) {
+            try {
+                if (ds.isConnected()) {
+                    ds.disconnect();
+                }
+            } catch (Exception e) {
+                logger.warn("Error while disconnecting from " + ssid + ": " + e.getMessage());
+            } finally {
+                // ROBUST CLEANUP: Always call destroy()
+                try {
+                    ds.destroy();
+                } catch (Exception destroyEx) {
+                }
+                ds = null;
+            }
+        }
+    }
+
+    public boolean isConnected() {
+        try {
+            return ds != null && ds.isConnected();
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    public DKDatastoreICM getDatastore() {
+        return ds;
+    }
+
+    /**
+     * Performance: Zugriff auf native JDBC-Verbindung für schnelle SQL-count.
+     * Verwende interne SDK-Cast-Operationen, um die zugrunde liegende java.sql.Connection abzurufen.
+     */
+    // Perf: Cache-Reflexionsmethode zur Vermeidung von wiederholten Lookup-Overheads
+    private static volatile java.lang.reflect.Method cachedNativeMethod = null;
+
+    public java.sql.Connection getJDBCConnection() throws Exception {
+        if (ds == null || !ds.isConnected()) return null;
+        try {
+            Object handle = ds.connection().handle();
+            
+            // Doppelt überprüfte Sperre für Caching-Methoden
+            if (cachedNativeMethod == null) {
+                synchronized (CMConnection.class) {
+                    if (cachedNativeMethod == null) {
+                        cachedNativeMethod = handle.getClass().getMethod("getNativeConnection");
+                    }
+                }
+            }
+            
+            return (java.sql.Connection) cachedNativeMethod.invoke(handle);
+        } catch (Exception e) {
+            logger.warn("Failed to retrieve native JDBC connection: " + e.getMessage());
+            return null;
+        }
+    }
+
+    public String getSSID() {
+        return ssid;
+    }
+
+    public Role getRole() {
+        return role;
+    }
+
+    /**
+    * Dynamische Schemaerkennung.
+    * Findet den Namen der Stammkomponententabelle für einen bestimmten ItemType.
+    * Dadurch werden fest codierte „ICMSTITEMS001001”-Referenzen überflüssig.
+    */
+    public String getMSTTableName(String itemType) throws Exception {
+        if (TABLE_NAME_CACHE.containsKey(itemType)) return TABLE_NAME_CACHE.get(itemType);
+
+        int id = getRootComponentTypeId(itemType);
+        // CM Pattern: ICMSTITEMS + 3rd-padded CompTypeId + 001 (Base Table)
+        String tableName = "ICMSTITEMS" + String.format("%03d", id) + "001";
+        
+        TABLE_NAME_CACHE.put(itemType, tableName);
+        return tableName;
+    }
+
+    public int getRootComponentTypeId(String itemType) throws Exception {
+        if (ds == null || !ds.isConnected()) throw new IllegalStateException("Not connected for schema discovery");
+        if (SCHEMA_WARN_SEEN.add(itemType)) {
+            logger.warn("Dynamic Schema Discovery temporarily disabled for {}. Using default Component Type ID 1001.", itemType);
+        }
+        return 1001;
+    }
+
+    @Override
+    public void close() {
+        disconnect();
+    }
+}

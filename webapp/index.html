@@ -1,0 +1,1006 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CM Migrator v2.2 - WebGUI</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #f6f7fb; --panel: #ffffff; --border: #e2e8f0;
+            --accent: #f97316; --primary: #0f172a; --success: #16a34a;
+            --error: #dc2626; --text: #1e293b; --muted: #64748b;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+        .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; padding: 20px; background: var(--primary); border-radius: 16px; color: #fff; }
+        .logo { display: flex; align-items: center; gap: 12px; }
+        .logo-icon { width: 48px; height: 48px; background: var(--accent); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 24px; }
+        h1 { font-size: 1.5rem; font-weight: 800; letter-spacing: -0.5px; }
+        .subtitle { color: var(--muted); font-size: 0.85rem; margin-top: 4px; }
+        .actions { display: flex; gap: 12px; }
+        .btn { padding: 10px 20px; border-radius: 8px; font-weight: 700; cursor: pointer; border: none; transition: all 0.2s; font-size: 14px; }
+        .btn-primary { background: var(--accent); color: #fff; }
+        .btn-primary:hover { background: #ea580c; }
+        .btn-secondary { background: #475569; color: #fff; }
+        .btn-danger { background: var(--error); color: #fff; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .grid { display: grid; grid-template-columns: 350px 1fr 320px; gap: 20px; }
+        @media (max-width: 1200px) { .grid { grid-template-columns: 1fr; } }
+        .card { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+        .card h3 { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 16px; }
+        .form-group { margin-bottom: 16px; }
+        .form-group label { display: block; font-size: 0.8rem; color: var(--muted); margin-bottom: 6px; font-weight: 600; }
+        .form-group input, .form-group select { width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-family: 'JetBrains Mono', monospace; font-size: 13px; }
+        .form-group input:focus, .form-group select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(249,115,22,0.15); }
+        .status-badge { display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; border-radius: 99px; font-size: 12px; font-weight: 700; }
+        .status-badge.running { background: #dcfce7; color: var(--success); }
+        .status-badge.stopped { background: #fee2e2; color: var(--error); }
+        .status-badge.idle { background: #e0e7ff; color: #4f46e5; }
+        .gauge-container { display: flex; justify-content: center; padding: 20px 0; }
+        .gauge { position: relative; width: 280px; height: 280px; }
+        .gauge svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+        .gauge-bg { fill: none; stroke: #e9edf7; stroke-width: 20; }
+        .gauge-fill { fill: none; stroke: var(--accent); stroke-width: 20; stroke-linecap: round; transition: stroke-dashoffset 1s ease; }
+        .gauge-text { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; }
+        .gauge-percent { font-size: 48px; font-weight: 800; color: var(--primary); }
+        .gauge-label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+        .stats-row { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-top: 20px; }
+        .stat-box { background: #f8fafc; border: 1px solid var(--border); border-radius: 12px; padding: 16px; text-align: center; }
+        .stat-val { font-family: 'JetBrains Mono', monospace; font-size: 1.5rem; font-weight: 700; }
+        .stat-label { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; margin-top: 4px; }
+        .benchmark-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 16px; }
+        .bench-card { background: #f8fafc; border: 1px solid var(--border); border-radius: 12px; padding: 14px; }
+        .bench-title { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; margin-bottom: 8px; }
+        .bench-val { font-family: 'JetBrains Mono', monospace; font-size: 1.1rem; font-weight: 700; }
+        .bench-sub { font-size: 0.75rem; color: var(--muted); }
+        .checkbox-row { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+        .checkbox-row input[type="checkbox"] { width: 18px; height: 18px; }
+        .override-fields { margin-left: 26px; padding-left: 16px; border-left: 2px solid var(--border); }
+        .override-fields.hidden { display: none; }
+        .toast { position: fixed; bottom: 20px; right: 20px; padding: 14px 20px; background: var(--primary); color: #fff; border-radius: 12px; font-weight: 600; box-shadow: 0 8px 20px rgba(0,0,0,0.2); transform: translateY(100px); opacity: 0; transition: all 0.3s; z-index: 1000; }
+        .toast.show { transform: translateY(0); opacity: 1; }
+        .toast.success { background: var(--success); }
+        .toast.error { background: var(--error); }
+        .text-success { color: var(--success); }
+        .text-error { color: var(--error); }
+        .stats-footer { display:flex;justify-content:space-between;margin-top:20px;padding:12px;background:#f8fafc;border-radius:12px; }
+        .profile-bar { display:flex;gap:12px;align-items:center;margin-bottom:20px;padding:14px 18px;background:#fff;border:1px solid var(--border);border-radius:14px;box-shadow:0 4px 12px rgba(0,0,0,0.04); }
+        .profile-bar label { font-size:12px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.08em; }
+        .profile-bar select, .profile-bar input { padding:9px 10px;border:1px solid var(--border);border-radius:8px;font-family:'JetBrains Mono',monospace;font-size:13px; }
+        .profile-bar select { min-width:260px; }
+        .profile-bar input { flex:1; }
+        .process-panel { margin-top:16px;padding:14px;border:1px solid #fed7aa;background:#fff7ed;border-radius:12px;display:none; }
+        .process-panel.show { display:block; }
+        .process-panel a { color:#ea580c;font-weight:800;text-decoration:none; }
+        .btn-safe { background:#2563eb;color:#fff; }
+        .btn-safe:hover { background:#1d4ed8; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <div class="logo">
+                <div class="logo-icon">⛁</div>
+                <div>
+                    <h1>CM Migrator v2.2</h1>
+                    <div class="subtitle" id="systemInfo">WebGUI • Ready</div>
+                </div>
+            </div>
+            <div class="actions">
+                <button class="btn btn-primary" id="btnStart" onclick="startMigration()">▶ Migrate</button>
+                <button class="btn btn-safe" id="btnSafe" onclick="startSafeWorkflow()">🛡️ Safe</button>
+                <button class="btn btn-danger" id="btnDelete" onclick="startDelete()">🗑️ Delete</button>
+                <button class="btn btn-secondary" id="btnVerify" onclick="startVerification()">✓ Verify</button>
+                <button class="btn btn-danger" id="btnStop" onclick="stopMigration()" disabled>⏹ Stop</button>
+                <button class="btn btn-secondary" onclick="runBenchmark()">🔬 Bench</button>
+            </div>
+        </header>
+        <div class="profile-bar">
+            <label for="profileSelect">Config profile</label>
+            <select id="profileSelect" onchange="profileChanged()">
+                <option value="conf/migration.properties">migration</option>
+            </select>
+            <input type="text" id="configFilePath" value="conf/migration.properties" placeholder="conf/profiles/name.properties">
+            <button class="btn btn-secondary" onclick="loadConfig()">Load</button>
+            <button class="btn btn-primary" onclick="applyConfig()">Save</button>
+            <button class="btn btn-secondary" onclick="saveProfileAs()">Save as</button>
+        </div>
+        <div class="grid">
+            <!-- Left: Configuration -->
+            <div class="card">
+                <h3>Configuration</h3>
+                <div class="form-group">
+                    <label for="sourceSSID">SOURCE_SSID</label>
+                    <input type="text" id="sourceSSID" placeholder="z.B. ICMNLSDB">
+                </div>
+                <div class="form-group">
+                    <label for="destSSID">DEST_SSID</label>
+                    <input type="text" id="destSSID" placeholder="z.B. ICMNLSDB2">
+                </div>
+                <div class="form-group">
+                    <label for="sourceUser">SOURCE_USER</label>
+                    <input type="text" id="sourceUser" placeholder="source_admin">
+                </div>
+                <div class="form-group">
+                    <label for="sourcePassword">SOURCE_PASSWORD</label>
+                    <input type="password" id="sourcePassword" placeholder="••••••••">
+                </div>
+                <div class="form-group">
+                    <label for="destUser">DEST_USER</label>
+                    <input type="text" id="destUser" placeholder="dest_admin (leer = gleich wie Source)">
+                </div>
+                <div class="form-group">
+                    <label for="destPassword">DEST_PASSWORD</label>
+                    <input type="password" id="destPassword" placeholder="•••••••• (leer = gleich wie Source)">
+                </div>
+                <div class="form-group">
+                    <label for="itemTypes">MIGRATE_ITEMTYPES</label>
+                    <input type="text" id="itemTypes" placeholder="Rechnung:Rechnung_V2">
+                </div>
+                <div class="form-group">
+                    <label for="filterPredicate">FILTER_PREDICATE <span style="font-size:10px;color:#94a3b8">(Optional SQL WHERE)</span></label>
+                    <input type="text" id="filterPredicate" placeholder="z.B. Erstelldatum > '2020-01-01'">
+                </div>
+                <div class="form-group">
+                    <label for="operationMode">OPERATION_MODE</label>
+                    <select id="operationMode">
+                        <option value="MIGRATE">MIGRATE</option>
+                        <option value="DELETE">DELETE</option>
+                        <option value="VERIFY">VERIFY</option>
+                    </select>
+                </div>
+                <div class="checkbox-row">
+                    <input type="checkbox" id="dryRun">
+                    <label for="dryRun" style="margin:0;font-size:13px;">DRY_RUN</label>
+                </div>
+                <div class="form-group">
+                    <label for="dbPath">DB_PATH</label>
+                    <input type="text" id="dbPath" placeholder="./data/migration_journal">
+                </div>
+                <div class="form-group">
+                    <label for="producerCountStrategy">PRODUCER_COUNT_STRATEGY</label>
+                    <select id="producerCountStrategy">
+                        <option value="HYBRID">HYBRID</option>
+                        <option value="COUNT_SQL">COUNT_SQL</option>
+                        <option value="SDK_CURSOR">SDK_CURSOR</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="profile">PROFILE</label>
+                    <select id="profile">
+                        <option value="AUTO">AUTO (Benchmark-basiert)</option>
+                        <option value="KLEIN">KLEIN (&lt;10M Items)</option>
+                        <option value="MITTEL" selected>MITTEL (10-100M)</option>
+                        <option value="GROSS">GROSS (100-500M)</option>
+                        <option value="EXTREM">EXTREM (500M+)</option>
+                    </select>
+                </div>
+                <div class="checkbox-row">
+                    <input type="checkbox" id="overrideCheck" onchange="toggleOverride()">
+                    <label for="overrideCheck" style="margin:0;font-size:13px;">Override Profile Settings</label>
+                </div>
+                <div class="override-fields hidden" id="overrideFields">
+                    <div class="form-group">
+                        <label for="threadCount">THREAD_COUNT</label>
+                        <input type="number" id="threadCount" placeholder="auto">
+                    </div>
+                    <div class="form-group">
+                        <label for="batchSize">BATCH_SIZE</label>
+                        <input type="number" id="batchSize" placeholder="auto">
+                    </div>
+                    <div class="form-group">
+                        <label for="queueSize">QUEUE_SIZE</label>
+                        <input type="number" id="queueSize" placeholder="auto">
+                    </div>
+                    <div class="form-group">
+                        <label for="sourcePoolSize">SOURCE_POOL_SIZE</label>
+                        <input type="number" id="sourcePoolSize" placeholder="auto">
+                    </div>
+                    <div class="form-group">
+                        <label for="destPoolSize">DEST_POOL_SIZE</label>
+                        <input type="number" id="destPoolSize" placeholder="auto">
+                    </div>
+                </div>
+                <div style="margin-top:20px;display:flex;gap:10px;">
+                    <button class="btn btn-primary" onclick="applyConfig()" style="flex:1">✓ Apply</button>
+                    <button class="btn btn-secondary" onclick="exportConfig()" style="flex:1">📤 Export</button>
+                    <label class="btn btn-secondary" style="flex:1;text-align:center">
+                        📥 Import
+                        <input type="file" accept=".properties,.txt" onchange="importConfig(event)" style="display:none">
+                    </label>
+                </div>
+            </div>
+            <!-- Center: Live Status -->
+            <div class="card">
+                <h3>Live Status</h3>
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+                    <span class="status-badge idle" id="statusBadge">● IDLE</span>
+                    <span style="font-family:'JetBrains Mono';color:var(--muted);font-size:13px;" id="timestamp">--:--:--</span>
+                </div>
+                <div class="process-panel" id="processPanel">
+                    <div style="font-size:12px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.08em">Process page</div>
+                    <div style="margin-top:6px"><a href="#" target="_blank" id="processLink">Open process</a></div>
+                    <div style="font-size:12px;color:var(--muted);margin-top:6px" id="processMeta"></div>
+                </div>
+                <div class="gauge-container">
+                    <div class="gauge">
+                        <svg viewBox="0 0 200 200">
+                            <circle class="gauge-bg" cx="100" cy="100" r="80"></circle>
+                            <circle class="gauge-fill" id="gaugeFill" cx="100" cy="100" r="80" stroke-dasharray="502.65" stroke-dashoffset="502.65"></circle>
+                        </svg>
+                        <div class="gauge-text">
+                            <div class="gauge-percent" id="gaugePercent">0%</div>
+                            <div class="gauge-label">Complete</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="stats-row">
+                    <div class="stat-box"><div class="stat-val" id="statProcessed">0</div><div class="stat-label">Processed</div></div>
+                    <div class="stat-box"><div class="stat-val" id="statTotal">0</div><div class="stat-label">Total</div></div>
+                    <div class="stat-box"><div class="stat-val text-success" id="statSuccess">0</div><div class="stat-label">Success</div></div>
+                    <div class="stat-box"><div class="stat-val text-error" id="statFailed">0</div><div class="stat-label">Failed</div></div>
+                </div>
+                <div class="stats-footer">
+                    <div><span style="color:var(--muted);font-size:12px;">Speed</span><br><strong id="statSpeed">0.0</strong> items/s</div>
+                    <div><span style="color:var(--muted);font-size:12px;">Elapsed</span><br><strong id="statElapsed">--:--</strong></div>
+                    <div><span style="color:var(--muted);font-size:12px;">ETA</span><br><strong id="statEta">--:--</strong></div>
+                </div>
+            </div>
+            <!-- Right: Benchmark Results -->
+            <div class="card">
+                <h3>System Benchmark</h3>
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                    <span class="status-badge idle" id="benchStatus">● Ready</span>
+                    <span style="font-size:12px;color:var(--muted);" id="benchRecommend">Recommended: --</span>
+                </div>
+                <div class="benchmark-grid">
+                    <div class="bench-card">
+                        <div class="bench-title">CPU Cores</div>
+                        <div class="bench-val" id="benchCpu">--</div>
+                    </div>
+                    <div class="bench-card">
+                        <div class="bench-title">Memory</div>
+                        <div class="bench-val" id="benchMem">--</div>
+                        <div class="bench-sub">MB heap</div>
+                    </div>
+                    <div class="bench-card">
+                        <div class="bench-title">Bottleneck</div>
+                        <div class="bench-val" id="benchBottle">--</div>
+                    </div>
+                </div>
+                <h3 style="margin-top:20px;">I/O Performance</h3>
+                <div class="benchmark-grid">
+                    <div class="bench-card">
+                        <div class="bench-title">Disk Write</div>
+                        <div class="bench-val" id="benchDiskW">--</div>
+                        <div class="bench-sub">MB/s</div>
+                    </div>
+                    <div class="bench-card">
+                        <div class="bench-title">Disk Read</div>
+                        <div class="bench-val" id="benchDiskR">--</div>
+                        <div class="bench-sub">MB/s</div>
+                    </div>
+                    <div class="bench-card">
+                        <div class="bench-title">H2 Insert</div>
+                        <div class="bench-val" id="benchH2">--</div>
+                        <div class="bench-sub">rows/s</div>
+                    </div>
+                </div>
+                <h3 style="margin-top:20px;">Network</h3>
+                <div class="benchmark-grid" style="grid-template-columns:1fr 1fr;">
+                    <div class="bench-card">
+                        <div class="bench-title">Source Latency</div>
+                        <div class="bench-val" id="benchSrcLat">--</div>
+                        <div class="bench-sub">ms</div>
+                    </div>
+                    <div class="bench-card">
+                        <div class="bench-title">Dest Latency</div>
+                        <div class="bench-val" id="benchDstLat">--</div>
+                        <div class="bench-sub">ms</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="toast" id="toast"></div>
+    <script>
+        let pollInterval = null;
+        
+        function toast(msg, type='') {
+            const t = document.getElementById('toast');
+            t.textContent = msg;
+            t.className = 'toast show ' + type;
+            setTimeout(() => t.className = 'toast', 3000);
+        }
+        
+        function toggleOverride() {
+            const fields = document.getElementById('overrideFields');
+            fields.classList.toggle('hidden', !document.getElementById('overrideCheck').checked);
+        }
+        
+        async function loadConfig() {
+            try {
+                const resp = await fetch('/api/config');
+                const cfg = await resp.json();
+                document.getElementById('sourceSSID').value = cfg.SOURCE_SSID || '';
+                document.getElementById('destSSID').value = cfg.DEST_SSID || '';
+                document.getElementById('sourceUser').value = cfg.SOURCE_USER || cfg.CONNECT_USER || '';
+                document.getElementById('destUser').value = cfg.DEST_USER || '';
+                document.getElementById('itemTypes').value = cfg.MIGRATE_ITEMTYPES || '';
+                document.getElementById('filterPredicate').value = cfg.FILTER_PREDICATE || '';
+                document.getElementById('profile').value = cfg.PROFILE || 'MITTEL';
+                if (cfg.THREAD_COUNT) { document.getElementById('threadCount').value = cfg.THREAD_COUNT; document.getElementById('overrideCheck').checked = true; toggleOverride(); }
+                if (cfg.BATCH_SIZE) document.getElementById('batchSize').value = cfg.BATCH_SIZE;
+                if (cfg.QUEUE_SIZE) document.getElementById('queueSize').value = cfg.QUEUE_SIZE;
+                toast('Configuration loaded', 'success');
+            } catch (e) { toast('Failed to load config', 'error'); }
+        }
+        
+        async function saveConfig() {
+            const sourceUser = document.getElementById('sourceUser').value;
+            const sourcePass = document.getElementById('sourcePassword').value;
+            const destUser = document.getElementById('destUser').value;
+            const destPass = document.getElementById('destPassword').value;
+            
+            const filterPred = document.getElementById('filterPredicate').value;
+            
+            const cfg = {
+                SOURCE_SSID: document.getElementById('sourceSSID').value,
+                DEST_SSID: document.getElementById('destSSID').value,
+                SOURCE_USER: sourceUser,
+                MIGRATE_ITEMTYPES: document.getElementById('itemTypes').value,
+                PROFILE: document.getElementById('profile').value
+            };
+            
+            // Optional: Filter Predicate nur wenn gesetzt
+            if (filterPred) cfg.FILTER_PREDICATE = filterPred;
+            
+            // Wenn Source-Passwort gesetzt, speichern
+            if (sourcePass) cfg.SOURCE_PASSWORD = sourcePass;
+            
+            // Wenn Dest-User explizit gesetzt, verwende separate Credentials
+            if (destUser) {
+                cfg.DEST_USER = destUser;
+                if (destPass) cfg.DEST_PASSWORD = destPass;
+            } else {
+                // Fallback: CONNECT_USER für beide (alte Kompatibilität)
+                cfg.CONNECT_USER = sourceUser;
+            }
+            
+            if (document.getElementById('overrideCheck').checked) {
+                if (document.getElementById('threadCount').value) cfg.THREAD_COUNT = document.getElementById('threadCount').value;
+                if (document.getElementById('batchSize').value) cfg.BATCH_SIZE = document.getElementById('batchSize').value;
+                if (document.getElementById('queueSize').value) cfg.QUEUE_SIZE = document.getElementById('queueSize').value;
+            }
+            try {
+                const resp = await fetch('/api/config', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(cfg) });
+                const result = await resp.json();
+                toast(result.message || 'Saved!', 'success');
+            } catch (e) { toast('Failed to save', 'error'); }
+        }
+        
+        async function startMigration() {
+            try {
+                const resp = await fetch('/api/migration/start', { method: 'POST' });
+                const result = await resp.json();
+                if (result.success) {
+                    toast('Migration started', 'success');
+                    document.getElementById('btnStart').disabled = true;
+                    document.getElementById('btnStop').disabled = false;
+                    startPolling();
+                } else { toast(result.error || 'Failed', 'error'); }
+            } catch (e) { toast('Failed to start', 'error'); }
+        }
+        
+        async function stopMigration() {
+            try {
+                const resp = await fetch('/api/migration/stop', { method: 'POST' });
+                const result = await resp.json();
+                toast(result.message || 'Stop signal sent');
+            } catch (e) { toast('Failed to stop', 'error'); }
+        }
+        
+        async function startDelete() {
+            if (!confirm('⚠️ WARNUNG: Sie sind dabei, Daten im QUELLSYSTEM zu löschen!\n\nDies kann nicht rückgängig gemacht werden.\n\nFortfahren?')) {
+                return;
+            }
+            try {
+                const resp = await fetch('/api/delete/start', { method: 'POST' });
+                const result = await resp.json();
+                if (result.success) {
+                    toast('Delete-Modus gestartet', 'success');
+                    document.getElementById('btnStart').disabled = true;
+                    document.getElementById('btnDelete').disabled = true;
+                    document.getElementById('btnStop').disabled = false;
+                    startPolling();
+                } else { toast(result.error || 'Failed', 'error'); }
+            } catch (e) { toast('Failed to start delete', 'error'); }
+        }
+        
+        async function startVerification() {
+            try {
+                const resp = await fetch('/api/verify/start', { method: 'POST' });
+                const result = await resp.json();
+                if (result.success) {
+                    toast('Verifikation gestartet', 'success');
+                    document.getElementById('btnStart').disabled = true;
+                    document.getElementById('btnVerify').disabled = true;
+                    document.getElementById('btnStop').disabled = false;
+                    startPolling();
+                } else { toast(result.error || 'Failed', 'error'); }
+            } catch (e) { toast('Failed to start verification', 'error'); }
+        }
+        
+        async function runBenchmark() {
+            // v2.2.2: Fix - Use sourceUser/sourcePassword instead of non-existent connectUser/connectPassword
+            const password = document.getElementById('sourcePassword').value;
+                    
+            const data = {
+                sourceSSID: document.getElementById('sourceSSID').value,
+                destSSID: document.getElementById('destSSID').value,
+                user: document.getElementById('sourceUser').value,
+                password: password,
+                configFile: getSelectedConfigFile ? getSelectedConfigFile() : '',
+                quick: (!document.getElementById('sourceSSID').value || !password) ? 'true' : 'false'
+            };
+            try {
+                document.getElementById('benchStatus').textContent = '● Running...';
+                document.getElementById('benchStatus').className = 'status-badge running';
+                const resp = await fetch('/api/benchmark', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(data) });
+                toast('Benchmark started', 'success');
+                setTimeout(pollBenchmark, 2000);
+            } catch (e) { toast('Benchmark failed', 'error'); }
+        }
+        
+        async function pollBenchmark() {
+            try {
+                const resp = await fetch('/api/benchmark/status');
+                const data = await resp.json();
+                if (data.running) { setTimeout(pollBenchmark, 1000); return; }
+                document.getElementById('benchStatus').textContent = '● Complete';
+                document.getElementById('benchStatus').className = 'status-badge idle';
+                if (data.results) {
+                    const r = data.results;
+                    document.getElementById('benchCpu').textContent = r.cpuCores || '--';
+                    document.getElementById('benchMem').textContent = r.memoryMB || '--';
+                    document.getElementById('benchBottle').textContent = r.bottleneck || '--';
+                    document.getElementById('benchRecommend').textContent = 'Recommended: ' + (r.recommendedProfile || '--');
+                    if (r.io) {
+                        document.getElementById('benchDiskW').textContent = r.io.diskWriteMBps || '--';
+                        document.getElementById('benchDiskR').textContent = r.io.diskReadMBps || '--';
+                        document.getElementById('benchH2').textContent = Math.round(r.io.h2InsertRowsPerSec) || '--';
+                    }
+                    if (r.source) document.getElementById('benchSrcLat').textContent = r.source.latencyMs || '--';
+                    if (r.dest) document.getElementById('benchDstLat').textContent = r.dest.latencyMs || '--';
+                }
+            } catch (e) {}
+        }
+        
+        function startPolling() {
+            if (pollInterval) return;
+            pollInterval = setInterval(pollStatus, 1000);
+        }
+        
+        function stopPolling() {
+            if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
+        }
+        
+        async function pollStatus() {
+            try {
+                const resp = await fetch('/api/migration/status');
+                const data = await resp.json();
+                const badge = document.getElementById('statusBadge');
+                const now = new Date();
+                document.getElementById('timestamp').textContent = now.toLocaleTimeString();
+                if (data.running) {
+                    badge.textContent = '● RUNNING';
+                    badge.className = 'status-badge running';
+                    document.getElementById('btnStart').disabled = true;
+                    document.getElementById('btnStop').disabled = false;
+                } else {
+                    badge.textContent = '● IDLE';
+                    badge.className = 'status-badge idle';
+                    document.getElementById('btnStart').disabled = false;
+                    document.getElementById('btnStop').disabled = true;
+                    stopPolling();
+                }
+                if (data.stats) {
+                    const s = data.stats;
+                    const pct = parseFloat(s.percent) || 0;
+                    const circumference = 2 * Math.PI * 80;
+                    const offset = circumference - (circumference * pct / 100);
+                    document.getElementById('gaugeFill').style.strokeDashoffset = offset;
+                    document.getElementById('gaugePercent').textContent = pct.toFixed(1) + '%';
+                    document.getElementById('statProcessed').textContent = s.processed.toLocaleString();
+                    document.getElementById('statTotal').textContent = s.total.toLocaleString();
+                    document.getElementById('statSuccess').textContent = s.success.toLocaleString();
+                    document.getElementById('statFailed').textContent = s.failed.toLocaleString();
+                    document.getElementById('statSpeed').textContent = parseFloat(s.speed).toFixed(1);
+                    const elapsed = Math.floor(s.elapsedMs / 1000);
+                    document.getElementById('statElapsed').textContent = formatTime(elapsed);
+                    document.getElementById('statEta').textContent = formatTime(s.etaSeconds);
+                }
+            } catch (e) {}
+        }
+        
+        function formatTime(sec) {
+            if (!sec || sec < 0) return '--:--';
+            const h = Math.floor(sec / 3600);
+            const m = Math.floor((sec % 3600) / 60);
+            const s = sec % 60;
+            if (h > 0) return h + ':' + String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
+            return m + ':' + String(s).padStart(2,'0');
+        }
+        
+        // Apply: Speichert die aktuelle Konfig auf dem Server
+        async function applyConfig() {
+            await saveConfig();
+        }
+        
+        // Export: Aktuelle Konfig als .properties Datei herunterladen
+        function exportConfig() {
+            // Frage nach Dateinamen
+            const defaultName = 'migration_' + new Date().toISOString().replace(/[:.]/g, '-').slice(0,16) + '.properties';
+            const filename = prompt('Dateiname für Export:', defaultName);
+            if (!filename) return; // Abgebrochen
+            
+            const lines = [
+                '# CM Migrator Configuration',
+                '# Generated by WebGUI on ' + new Date().toISOString(),
+                ''
+            ];
+            
+            const addProp = (key, elemId) => {
+                const val = document.getElementById(elemId)?.value;
+                if (val) lines.push(key + '=' + val);
+            };
+            
+            addProp('SOURCE_SSID', 'sourceSSID');
+            addProp('DEST_SSID', 'destSSID');
+            addProp('SOURCE_USER', 'sourceUser');
+            addProp('DEST_USER', 'destUser');
+            addProp('MIGRATE_ITEMTYPES', 'itemTypes');
+            addProp('FILTER_PREDICATE', 'filterPredicate');
+            addProp('PROFILE', 'profile');
+            
+            if (document.getElementById('overrideCheck').checked) {
+                addProp('THREAD_COUNT', 'threadCount');
+                addProp('BATCH_SIZE', 'batchSize');
+                addProp('QUEUE_SIZE', 'queueSize');
+            }
+            
+            // Note: Passwörter werden NICHT exportiert aus Sicherheitsgründen
+            lines.push('');
+            lines.push('# Note: Passwords are NOT exported for security reasons');
+            
+            const content = lines.join('\n');
+            const blob = new Blob([content], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename.endsWith('.properties') ? filename : filename + '.properties';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            toast('Exported as: ' + filename, 'success');
+        }
+        
+        // Import: .properties Datei lesen und Formular füllen
+        function importConfig(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const content = e.target.result;
+                const lines = content.split('\n');
+                const props = {};
+                
+                lines.forEach(line => {
+                    line = line.trim();
+                    if (!line || line.startsWith('#')) return;
+                    const idx = line.indexOf('=');
+                    if (idx > 0) {
+                        const key = line.substring(0, idx).trim();
+                        const val = line.substring(idx + 1).trim();
+                        props[key] = val;
+                    }
+                });
+                
+                // Formular füllen
+                if (props.SOURCE_SSID) document.getElementById('sourceSSID').value = props.SOURCE_SSID;
+                if (props.DEST_SSID) document.getElementById('destSSID').value = props.DEST_SSID;
+                if (props.SOURCE_USER || props.CONNECT_USER) document.getElementById('sourceUser').value = props.SOURCE_USER || props.CONNECT_USER;
+                if (props.DEST_USER) document.getElementById('destUser').value = props.DEST_USER;
+                if (props.MIGRATE_ITEMTYPES) document.getElementById('itemTypes').value = props.MIGRATE_ITEMTYPES;
+                if (props.FILTER_PREDICATE) document.getElementById('filterPredicate').value = props.FILTER_PREDICATE;
+                if (props.PROFILE) document.getElementById('profile').value = props.PROFILE;
+                
+                if (props.THREAD_COUNT || props.BATCH_SIZE || props.QUEUE_SIZE) {
+                    document.getElementById('overrideCheck').checked = true;
+                    toggleOverride();
+                    if (props.THREAD_COUNT) document.getElementById('threadCount').value = props.THREAD_COUNT;
+                    if (props.BATCH_SIZE) document.getElementById('batchSize').value = props.BATCH_SIZE;
+                    if (props.QUEUE_SIZE) document.getElementById('queueSize').value = props.QUEUE_SIZE;
+                }
+                
+                toast('Config imported. Passwords must be entered manually.', 'success');
+            };
+            reader.readAsText(file);
+            
+            // Reset file input
+            event.target.value = '';
+        }
+        
+
+        // ------------------------------------------------------------------
+        // Phase 1 WebGUI profile/process overrides
+        // ------------------------------------------------------------------
+        function getSelectedConfigFile() {
+            const input = document.getElementById('configFilePath');
+            const sel = document.getElementById('profileSelect');
+            const value = input && input.value ? input.value.trim() : '';
+            if (value) return value;
+            return sel && sel.value ? sel.value.trim() : '';
+        }
+
+        function setSelectedConfigFile(path) {
+            const clean = (path || '').trim();
+            const input = document.getElementById('configFilePath');
+            const sel = document.getElementById('profileSelect');
+
+            if (input) input.value = clean;
+
+            if (sel && clean) {
+                let found = false;
+                for (const opt of sel.options) {
+                    if (opt.value === clean) {
+                        opt.selected = true;
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    const opt = document.createElement('option');
+                    opt.value = clean;
+                    opt.textContent = clean + ' — custom';
+                    opt.selected = true;
+                    sel.appendChild(opt);
+                }
+            }
+        }
+
+        async function loadProfiles(preservePath) {
+            try {
+                const currentPath = (preservePath || getSelectedConfigFile() || '').trim();
+                const resp = await fetch('/api/profiles');
+                const data = await resp.json();
+                const sel = document.getElementById('profileSelect');
+                sel.innerHTML = '';
+
+                let selectedFound = false;
+                const profiles = data.profiles || [];
+
+                profiles.forEach(p => {
+                    const opt = document.createElement('option');
+                    opt.value = p.path;
+                    opt.textContent = p.name + ' — ' + p.path;
+                    if (currentPath && p.path === currentPath) {
+                        opt.selected = true;
+                        selectedFound = true;
+                    }
+                    sel.appendChild(opt);
+                });
+
+                if (currentPath && !selectedFound) {
+                    const opt = document.createElement('option');
+                    opt.value = currentPath;
+                    opt.textContent = currentPath + ' — custom';
+                    opt.selected = true;
+                    sel.appendChild(opt);
+                    selectedFound = true;
+                }
+
+                if (!selectedFound) {
+                    const opt = document.createElement('option');
+                    opt.value = 'conf/profiles/default.properties';
+                    opt.textContent = 'default — conf/profiles/default.properties';
+                    opt.selected = true;
+                    sel.appendChild(opt);
+                }
+
+                setSelectedConfigFile(sel.value);
+            } catch (e) {
+                toast('Could not load profiles', 'error');
+            }
+        }
+
+        function profileChanged() {
+            const sel = document.getElementById('profileSelect');
+            setSelectedConfigFile(sel.value);
+            loadConfig(sel.value);
+        }
+
+        async function loadConfig(explicitConfigFile) {
+            try {
+                const configFile = (explicitConfigFile || getSelectedConfigFile()).trim();
+                if (!configFile) {
+                    toast('No config file selected', 'error');
+                    return;
+                }
+
+                const resp = await fetch('/api/config?configFile=' + encodeURIComponent(configFile));
+                const cfg = await resp.json();
+                if (cfg.error) {
+                    toast(cfg.error, 'error');
+                    return;
+                }
+
+                const loadedFile = cfg.__configFile || configFile;
+                setSelectedConfigFile(loadedFile);
+
+                document.getElementById('sourceSSID').value = cfg.SOURCE_SSID || '';
+                document.getElementById('destSSID').value = cfg.DEST_SSID || '';
+                document.getElementById('sourceUser').value = cfg.SOURCE_USER || cfg.CONNECT_USER || '';
+                document.getElementById('sourcePassword').value = '';
+                document.getElementById('destUser').value = cfg.DEST_USER || '';
+                document.getElementById('destPassword').value = '';
+                document.getElementById('itemTypes').value = cfg.MIGRATE_ITEMTYPES || cfg.MIGRATEITEMTYPES || '';
+                document.getElementById('filterPredicate').value = cfg.FILTER_PREDICATE || '';
+                document.getElementById('operationMode').value = cfg.OPERATION_MODE || 'MIGRATE';
+                document.getElementById('dryRun').checked = String(cfg.DRY_RUN || 'false').toLowerCase() === 'true';
+                document.getElementById('dbPath').value = cfg.DB_PATH || './data/migration_journal';
+                document.getElementById('producerCountStrategy').value = cfg.PRODUCER_COUNT_STRATEGY || 'HYBRID';
+                document.getElementById('profile').value = cfg.PROFILE || 'MITTEL';
+
+                const override = cfg.THREAD_COUNT || cfg.BATCH_SIZE || cfg.QUEUE_SIZE || cfg.SOURCE_POOL_SIZE || cfg.DEST_POOL_SIZE;
+                document.getElementById('overrideCheck').checked = !!override;
+                toggleOverride();
+                document.getElementById('threadCount').value = cfg.THREAD_COUNT || '';
+                document.getElementById('batchSize').value = cfg.BATCH_SIZE || '';
+                document.getElementById('queueSize').value = cfg.QUEUE_SIZE || '';
+                document.getElementById('sourcePoolSize').value = cfg.SOURCE_POOL_SIZE || '';
+                document.getElementById('destPoolSize').value = cfg.DEST_POOL_SIZE || '';
+
+                toast('Configuration loaded', 'success');
+            } catch (e) {
+                toast('Failed to load config', 'error');
+            }
+        }
+
+        function collectConfigFromForm(configFile) {
+            const sourceUser = document.getElementById('sourceUser').value;
+            const sourcePass = document.getElementById('sourcePassword').value;
+            const destUser = document.getElementById('destUser').value;
+            const destPass = document.getElementById('destPassword').value;
+
+            const cfg = {
+                __configFile: configFile,
+                SOURCE_SSID: document.getElementById('sourceSSID').value,
+                DEST_SSID: document.getElementById('destSSID').value,
+                SOURCE_USER: sourceUser,
+                MIGRATE_ITEMTYPES: document.getElementById('itemTypes').value,
+                FILTER_PREDICATE: document.getElementById('filterPredicate').value,
+                OPERATION_MODE: document.getElementById('operationMode').value,
+                DRY_RUN: document.getElementById('dryRun').checked ? 'true' : 'false',
+                DB_PATH: document.getElementById('dbPath').value,
+                PRODUCER_COUNT_STRATEGY: document.getElementById('producerCountStrategy').value,
+                PROFILE: document.getElementById('profile').value
+            };
+
+            // Passwortfelder bleiben leer, wenn schon *_CRYPT in der Datei existiert.
+            // Nur wenn der Benutzer hier etwas einträgt, wird ein Klartext-Passwort gespeichert.
+            if (sourcePass) cfg.SOURCE_PASSWORD = sourcePass;
+
+            if (destUser) {
+                cfg.DEST_USER = destUser;
+                if (destPass) cfg.DEST_PASSWORD = destPass;
+            } else {
+                cfg.CONNECT_USER = sourceUser;
+            }
+
+            if (document.getElementById('overrideCheck').checked) {
+                const mapping = {
+                    threadCount: 'THREAD_COUNT',
+                    batchSize: 'BATCH_SIZE',
+                    queueSize: 'QUEUE_SIZE',
+                    sourcePoolSize: 'SOURCE_POOL_SIZE',
+                    destPoolSize: 'DEST_POOL_SIZE'
+                };
+                Object.keys(mapping).forEach(id => {
+                    const val = document.getElementById(id).value;
+                    if (val) cfg[mapping[id]] = val;
+                });
+            }
+
+            return cfg;
+        }
+
+        async function saveConfig(explicitConfigFile) {
+            const configFile = (explicitConfigFile || getSelectedConfigFile()).trim();
+            if (!configFile) {
+                toast('No config file selected', 'error');
+                throw new Error('No config file selected');
+            }
+
+            const cfg = collectConfigFromForm(configFile);
+
+            try {
+                const resp = await fetch('/api/config?configFile=' + encodeURIComponent(configFile), {
+                    method: 'POST',
+                    headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify(cfg)
+                });
+                const result = await resp.json();
+
+                if (result.error) {
+                    toast(result.error, 'error');
+                    throw new Error(result.error);
+                }
+
+                const savedFile = result.configFile || configFile;
+                setSelectedConfigFile(savedFile);
+                toast(result.message || 'Saved!', 'success');
+
+                // Wichtig: selected config beibehalten. Nicht auf erstes Profil zurückspringen.
+                await loadProfiles(savedFile);
+                setSelectedConfigFile(savedFile);
+
+                return savedFile;
+            } catch (e) {
+                toast('Failed to save', 'error');
+                throw e;
+            }
+        }
+
+        async function saveProfileAs() {
+            const name = prompt('New profile name:', 'migration_new');
+            if (!name) return;
+            const safeName = name.replace(/[^A-Za-z0-9._-]/g, '_');
+            const target = 'conf/profiles/' + safeName + '.properties';
+            setSelectedConfigFile(target);
+            const savedFile = await saveConfig(target);
+            await loadProfiles(savedFile);
+            setSelectedConfigFile(savedFile);
+        }
+
+        function showProcessLink(result) {
+            const panel = document.getElementById('processPanel');
+            const link = document.getElementById('processLink');
+            const meta = document.getElementById('processMeta');
+            if (!result || !result.processUrl) return;
+
+            panel.classList.add('show');
+            link.href = result.processUrl;
+            link.textContent = result.processAbsoluteUrl || result.processUrl;
+            meta.textContent = 'Run ID: ' + (result.runId || '') + ' · Dashboard: ' + (result.dashboardUrl || '');
+        }
+
+        async function startOperation(mode) {
+            const selectedConfigFile = getSelectedConfigFile();
+
+            if (!selectedConfigFile) {
+                toast('No config file selected', 'error');
+                return;
+            }
+
+            if (mode === 'delete') {
+                const itemType = document.getElementById('itemTypes').value || '<unknown>';
+                if (!confirm('⚠️ DELETE ist destruktiv.\n\nConfig: ' + selectedConfigFile + '\nItemTypes: ' + itemType + '\n\nFortfahren?')) {
+                    return;
+                }
+            }
+
+            try {
+                const savedConfigFile = await saveConfig(selectedConfigFile);
+
+                const resp = await fetch('/api/operation/start', {
+                    method: 'POST',
+                    headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({
+                        mode: mode,
+                        configFile: savedConfigFile
+                    })
+                });
+                const result = await resp.json();
+
+                if (result.success) {
+                    toast('Process started', 'success');
+                    showProcessLink(result);
+                    window.open(result.processUrl, '_blank');
+                    document.getElementById('btnStart').disabled = true;
+                    document.getElementById('btnSafe').disabled = true;
+                    document.getElementById('btnDelete').disabled = true;
+                    document.getElementById('btnVerify').disabled = true;
+                    document.getElementById('btnStop').disabled = false;
+                    startPolling();
+                } else {
+                    toast(result.error || 'Failed', 'error');
+                }
+            } catch (e) {
+                toast('Failed to start operation', 'error');
+            }
+        }
+
+        function startMigration() { startOperation('migration'); }
+        function startSafeWorkflow() { startOperation('safe'); }
+        function startDelete() { startOperation('delete'); }
+        function startVerification() { startOperation('verification'); }
+
+        async function stopMigration() {
+            try {
+                const resp = await fetch('/api/process/stop', { method: 'POST' });
+                const result = await resp.json();
+                toast(result.message || 'Stop signal sent');
+            } catch (e) {
+                toast('Failed to stop', 'error');
+            }
+        }
+
+        async function pollStatus() {
+            try {
+                const resp = await fetch('/api/process/current');
+                const data = await resp.json();
+                const p = data.process;
+                const badge = document.getElementById('statusBadge');
+                document.getElementById('timestamp').textContent = new Date().toLocaleTimeString();
+
+                if (p) {
+                    showProcessLink(p);
+
+                    const running = ['STARTING','RUNNING','STOPPING'].includes(p.status);
+                    badge.textContent = '● ' + p.status;
+                    badge.className = running ? 'status-badge running' : 'status-badge idle';
+
+                    document.getElementById('btnStart').disabled = running;
+                    document.getElementById('btnSafe').disabled = running;
+                    document.getElementById('btnDelete').disabled = running;
+                    document.getElementById('btnVerify').disabled = running;
+                    document.getElementById('btnStop').disabled = !running;
+
+                    if (p.stats) {
+                        const s = p.stats;
+                        const pct = parseFloat(s.percent) || 0;
+                        const circumference = 2 * Math.PI * 80;
+                        const offset = circumference - (circumference * pct / 100);
+
+                        document.getElementById('gaugeFill').style.strokeDashoffset = offset;
+                        document.getElementById('gaugePercent').textContent = pct.toFixed(1) + '%';
+
+                        document.getElementById('statProcessed').textContent = Number(s.processed || 0).toLocaleString();
+                        document.getElementById('statTotal').textContent = Number(s.total || 0).toLocaleString();
+                        document.getElementById('statSuccess').textContent = Number(s.success || 0).toLocaleString();
+                        document.getElementById('statFailed').textContent = Number(s.failed || 0).toLocaleString();
+                        document.getElementById('statSpeed').textContent = parseFloat(s.speed || 0).toFixed(1);
+
+                        const elapsed = Math.floor((s.elapsedMs || 0) / 1000);
+                        document.getElementById('statElapsed').textContent = formatTime(elapsed);
+                        document.getElementById('statEta').textContent = formatTime(s.etaSeconds || 0);
+                    }
+
+                    if (!running) stopPolling();
+                } else {
+                    badge.textContent = '● IDLE';
+                    badge.className = 'status-badge idle';
+                    document.getElementById('btnStart').disabled = false;
+                    document.getElementById('btnSafe').disabled = false;
+                    document.getElementById('btnDelete').disabled = false;
+                    document.getElementById('btnVerify').disabled = false;
+                    document.getElementById('btnStop').disabled = true;
+                }
+            } catch (e) {}
+        }
+
+        // Initial load
+        (async function initWebGuiPhase1(){
+            await loadProfiles(getSelectedConfigFile());
+            await loadConfig(getSelectedConfigFile());
+            pollStatus();
+        })();
+    </script>
+</body>
+</html>

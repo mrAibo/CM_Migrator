@@ -1,0 +1,510 @@
+#!/usr/bin/env bash
+#===============================================================================
+# CM Migrator - Release Build Script v2.2
+# Erstellt ein deploy-fertiges Paket ohne Quellcode (JAR, optional obfuskiert/signiert/native)
+#===============================================================================
+
+set -Eeuo pipefail
+IFS=$'\n\t'
+shopt -s nullglob
+
+# -----------------------------
+# Defaults / Konfiguration
+# -----------------------------
+VERSION_DEFAULT="2.2.0"
+VERSION="$VERSION_DEFAULT"
+
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+BUILD_DIR="$PROJECT_DIR/build"
+
+OBFUSCATE=false
+SIGN_JAR=false
+NATIVE_IMAGE=false
+
+PROGUARD_JAR="$PROJECT_DIR/tools/proguard.jar"
+PROGUARD_CONF="$PROJECT_DIR/tools/proguard.conf"
+
+INPUT_JAR="$PROJECT_DIR/bin/cm-migrator.jar"
+
+KEYSTORE="$PROJECT_DIR/tools/cm-migrator.keystore"
+KEYSTORE_ALIAS="cm-migrator"
+
+# Passwörter idealerweise per Env setzen (CI-freundlich):
+#   export KEYSTORE_STOREPASS='...'
+#   export KEYSTORE_KEYPASS='...'
+KEYSTORE_STOREPASS="${KEYSTORE_STOREPASS:-}"
+KEYSTORE_KEYPASS="${KEYSTORE_KEYPASS:-}"
+
+# Lokales JDK (Fallback: System-Tools)
+LOCAL_JDK="$PROJECT_DIR/java_env/jdk-11.0.2"
+
+# Native-Image Verhalten
+NATIVE_IMAGE_ALLOW_INCOMPLETE="${NATIVE_IMAGE_ALLOW_INCOMPLETE:-false}"
+
+# -----------------------------
+# Helpers
+# -----------------------------
+log()  { printf '%s\n' "$*"; }
+warn() { printf '⚠️  %s\n' "$*" >&2; }
+die()  { printf '❌ %s\n' "$*" >&2; exit 1; }
+
+on_err() {
+  local exit_code=$?
+  warn "Fehler in Zeile ${BASH_LINENO[0]} (Exit-Code: $exit_code)."
+  warn "Letztes Kommando: ${BASH_COMMAND}"
+  exit "$exit_code"
+}
+trap on_err ERR
+
+require_file() {
+  [[ -f "$1" ]] || die "Datei nicht gefunden: $1"
+}
+
+tool_or_fallback() {
+  local local_path="$1"
+  local fallback_cmd="$2"
+  if [[ -x "$local_path" ]]; then
+    printf '%s' "$local_path"
+  else
+    printf '%s' "$fallback_cmd"
+  fi
+}
+
+read_secret_if_empty() {
+  local var_name="$1"
+  local prompt="$2"
+  local current_value="${!var_name:-}"
+  if [[ -z "$current_value" ]]; then
+    # shellcheck disable=SC2162
+    read -rsp "$prompt" current_value
+    printf '\n'
+    [[ -n "$current_value" ]] || die "Leeres Passwort nicht erlaubt."
+    printf -v "$var_name" '%s' "$current_value"
+  fi
+}
+
+usage() {
+  cat <<EOF
+CM Migrator Release Builder v${VERSION_DEFAULT}
+
+Usage: $(basename "$0") [OPTIONS]
+
+Options:
+  --obfuscate         Obfuskiere JAR mit ProGuard
+  --sign              Signiere JAR (Keystore erforderlich)
+  --native            Erstelle GraalVM Native Image (wenn native-image vorhanden)
+  --all               Aktiviere: obfuscate + sign + native
+  --version VER       Setze Version (default: ${VERSION_DEFAULT})
+  --help|-h           Diese Hilfe anzeigen
+
+Env (optional, für non-interactive builds):
+  KEYSTORE_STOREPASS  Keystore-Passwort
+  KEYSTORE_KEYPASS    Key-Passwort
+
+Beispiele:
+  ./bin/build-release.sh                    # Standard-Release
+  ./bin/build-release.sh --obfuscate        # Mit Code-Obfuskierung
+  ./bin/build-release.sh --all              # Maximaler Schutz
+  ./bin/build-release.sh --version 2.3.0    # Andere Version
+
+EOF
+}
+
+# -----------------------------
+# Pre-Check: System & Abhängigkeiten
+# -----------------------------
+check_dependencies() {
+  local missing=()
+  local pkg_manager=""
+  
+  # System erkennen
+  if command -v rpm &>/dev/null; then
+    pkg_manager="rpm"
+  elif command -v dpkg &>/dev/null; then
+    pkg_manager="dpkg"
+  elif command -v pacman &>/dev/null; then
+    pkg_manager="pacman"
+  fi
+  
+  log "Prüfe Abhängigkeiten..."
+  
+  # gcc prüfen
+  if ! command -v gcc &>/dev/null; then
+    missing+=("gcc")
+  fi
+  
+  # zlib-devel prüfen (für Native Image)
+  if [[ "$NATIVE_IMAGE" == true ]]; then
+    if command -v rpm &>/dev/null; then
+      if ! rpm -q zlib-devel &>/dev/null; then
+        missing+=("zlib-devel")
+      fi
+    elif command -v dpkg &>/dev/null; then
+      if ! dpkg -l zlib1g-dev &>/dev/null 2>&1; then
+        missing+=("zlib1g-dev")
+      fi
+    elif command -v pacman &>/dev/null; then
+      if ! pacman -Q zlib &>/dev/null; then
+        missing+=("zlib")
+      fi
+    fi
+  fi
+  
+  # Fehlende Pakete melden
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    warn "Fehlende Pakete erkannt:"
+    for pkg in "${missing[@]}"; do
+      warn "  - $pkg"
+    done
+    
+    warn ""
+    warn "Installationshinweise:"
+    if command -v dnf &>/dev/null; then
+      warn "  sudo dnf install ${missing[*]}"
+    elif command -v yum &>/dev/null; then
+      warn "  sudo yum install ${missing[*]}"
+    elif command -v apt-get &>/dev/null; then
+      warn "  sudo apt-get install ${missing[*]}"
+    elif command -v zypper &>/dev/null; then
+      warn "  sudo zypper install ${missing[*]}"
+    elif command -v pacman &>/dev/null; then
+      warn "  sudo pacman -S ${missing[*]}"
+    fi
+    
+    warn ""
+    warn "Abbrechen? Drücken Sie STRG+C zum Beenden."
+    warn "Fortfahren? Drücken Sie ENTER..."
+    read -r
+  else
+    log "✅ Alle Abhängigkeiten installiert"
+  fi
+}
+
+# -----------------------------
+# Argumente parsen
+# -----------------------------
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --obfuscate) OBFUSCATE=true; shift ;;
+    --sign)      SIGN_JAR=true; shift ;;
+    --native)    NATIVE_IMAGE=true; shift ;;
+    --all)       OBFUSCATE=true; SIGN_JAR=true; NATIVE_IMAGE=true; shift ;;
+    --version)
+      [[ $# -ge 2 ]] || die "--version benötigt ein Argument"
+      VERSION="$2"
+      shift 2
+      ;;
+    --help|-h) usage; exit 0 ;;
+    *) die "Unbekannte Option: $1 (nutze --help)" ;;
+  esac
+done
+
+RELEASE_NAME="cm-migrator-v${VERSION}"
+RELEASE_DIR="$BUILD_DIR/$RELEASE_NAME"
+
+log "============================================="
+log " CM Migrator Release Builder"
+log " Version: $VERSION"
+log "============================================="
+log "Optionen:"
+log "  - Obfuscation: $OBFUSCATE"
+log "  - JAR-Signierung: $SIGN_JAR"
+log "  - Native Image: $NATIVE_IMAGE"
+log "---------------------------------------------"
+
+# -----------------------------
+# Pre-Check ausführen
+# -----------------------------
+check_dependencies
+
+# -----------------------------
+# [1/7] Aufräumen
+# -----------------------------
+log "[1/7] Aufräumen..."
+rm -rf "$BUILD_DIR"
+mkdir -p "$RELEASE_DIR"
+
+# -----------------------------
+# [2/7] Kompilieren
+# -----------------------------
+log "[2/7] Kompiliere Quellcode..."
+cd "$PROJECT_DIR"
+./bin/compile.sh
+log "✅ Kompilierung erfolgreich"
+
+# Input-JAR muss existieren
+require_file "$INPUT_JAR"
+
+# Ziel-JAR im Build
+BUILD_JAR="$BUILD_DIR/cm-migrator.jar"
+cp "$INPUT_JAR" "$BUILD_JAR"
+
+# -----------------------------
+# [3/7] Obfuskieren (optional)
+# -----------------------------
+if [[ "$OBFUSCATE" == true ]]; then
+  log "[3/7] Obfuskiere mit ProGuard..."
+  require_file "$PROGUARD_JAR"
+  require_file "$PROGUARD_CONF"
+
+  # JMODS suchen
+  JMODS_PATH=""
+  if [[ -d "$LOCAL_JDK/jmods" ]]; then
+    JMODS_PATH="$LOCAL_JDK/jmods"
+  elif [[ -n "${JAVA_HOME:-}" && -d "$JAVA_HOME/jmods" ]]; then
+    JMODS_PATH="$JAVA_HOME/jmods"
+  fi
+
+  if [[ -z "$JMODS_PATH" ]]; then
+    warn "Kein jmods-Verzeichnis gefunden -> Obfuscation übersprungen (JAR bleibt unverändert)."
+  else
+    OBF_JAR="$BUILD_DIR/cm-migrator-obf.jar"
+    MAPPING_FILE="$BUILD_DIR/proguard-mapping.txt"
+
+    java -jar "$PROGUARD_JAR" \
+      @"$PROGUARD_CONF" \
+      -injars "$BUILD_JAR" \
+      -outjars "$OBF_JAR" \
+      -printmapping "$MAPPING_FILE" \
+      -libraryjars "$JMODS_PATH/java.base.jmod(!**.jar;!module-info.class)" \
+      -libraryjars "$JMODS_PATH/java.sql.jmod(!**.jar;!module-info.class)" \
+      -libraryjars "$JMODS_PATH/java.logging.jmod(!**.jar;!module-info.class)" \
+      -libraryjars "$JMODS_PATH/java.management.jmod(!**.jar;!module-info.class)" \
+      -libraryjars "$PROJECT_DIR/lib"
+
+    mv -f "$OBF_JAR" "$BUILD_JAR"
+    log "✅ Obfuscation erfolgreich (Mapping: $MAPPING_FILE)"
+  fi
+else
+  log "[3/7] Obfuscation übersprungen"
+fi
+
+# -----------------------------
+# [4/7] Signieren (optional)
+# -----------------------------
+if [[ "$SIGN_JAR" == true ]]; then
+  log "[4/7] Signiere JAR..."
+
+  KEYTOOL="$(tool_or_fallback "$LOCAL_JDK/bin/keytool" "keytool")"
+  JARSIGNER="$(tool_or_fallback "$LOCAL_JDK/bin/jarsigner" "jarsigner")"
+
+  # Wenn Keystore fehlt: interaktiv erzeugen (für dich ok), sonst fail.
+  if [[ ! -f "$KEYSTORE" ]]; then
+    warn "Keystore nicht gefunden: $KEYSTORE"
+    read -rp "Keystore jetzt erzeugen? (y/N) " ans
+    if [[ "$ans" =~ ^[Yy]$ ]]; then
+      mkdir -p "$(dirname "$KEYSTORE")"
+      read_secret_if_empty KEYSTORE_STOREPASS "Keystore Storepass: "
+      read_secret_if_empty KEYSTORE_KEYPASS "Keystore Keypass: "
+
+      "$KEYTOOL" -genkeypair \
+        -alias "$KEYSTORE_ALIAS" \
+        -keyalg RSA -keysize 2048 -validity 3650 \
+        -keystore "$KEYSTORE" \
+        -storepass "$KEYSTORE_STOREPASS" \
+        -keypass "$KEYSTORE_KEYPASS" \
+        -dname "CN=CM Migrator, OU=IT, O=Company, L=City, ST=State, C=DE" \
+        -noprompt 2>&1 && {
+        log "✅ Keystore erstellt"
+      } || {
+        die "Keystore-Erstellung fehlgeschlagen"
+      }
+    else
+      die "Signierung angefordert, aber Keystore fehlt."
+    fi
+  fi
+
+  read_secret_if_empty KEYSTORE_STOREPASS "Keystore Storepass: "
+  read_secret_if_empty KEYSTORE_KEYPASS "Keystore Keypass: "
+
+  "$JARSIGNER" \
+    -keystore "$KEYSTORE" \
+    -storepass "$KEYSTORE_STOREPASS" \
+    -keypass "$KEYSTORE_KEYPASS" \
+    "$BUILD_JAR" \
+    "$KEYSTORE_ALIAS" 2>&1 && {
+    log "✅ JAR signiert"
+  } || {
+    die "Signierung fehlgeschlagen"
+  }
+
+  # Optional: Verifikation direkt im Build
+  "$JARSIGNER" -verify -certs "$BUILD_JAR" >/dev/null 2>&1 || true
+else
+  log "[4/7] Signierung übersprungen"
+fi
+
+# -----------------------------
+# [5/7] Native Image (optional)
+# -----------------------------
+if [[ "$NATIVE_IMAGE" == true ]]; then
+  log "[5/7] Erstelle GraalVM Native Image..."
+  
+  # Auto-detect GraalVM if not in PATH
+  if ! command -v native-image &>/dev/null; then
+    log "native-image nicht im PATH gefunden. Suche GraalVM..."
+    
+    # Suche in ~/tools/
+    if [[ -z "${GRAALVM_HOME:-}" ]]; then
+      for dir in "$HOME/tools"/graalvm-jdk-*; do
+        if [[ -d "$dir" ]] && [[ -f "$dir/bin/native-image" ]]; then
+          export GRAALVM_HOME="$dir"
+          export PATH="$GRAALVM_HOME/bin:$PATH"
+          log "✅ GraalVM gefunden: $GRAALVM_HOME"
+          break
+        fi
+      done
+    fi
+    
+    # Prüfe erneut
+    if ! command -v native-image &>/dev/null; then
+      warn "⚠️  GraalVM native-image nicht gefunden."
+      warn "    Bitte installieren Sie GraalVM:"
+      warn "    ./bin/graal_install.sh && ./bin/graal_setup.sh && source ~/.bashrc"
+      log "[5/7] Native Image übersprungen"
+      NATIVE_IMAGE=false
+    fi
+  fi
+  
+  if [[ "$NATIVE_IMAGE" == true ]]; then
+    mkdir -p "$RELEASE_DIR/bin"
+
+    NATIVE_ARGS=(-jar "$BUILD_JAR"
+                  -H:Name="$RELEASE_DIR/bin/cm-migrator"
+                  --no-fallback
+                  -H:+ReportExceptionStackTraces )
+
+    if [[ "$NATIVE_IMAGE_ALLOW_INCOMPLETE" == true ]]; then
+      NATIVE_ARGS+=(--allow-incomplete-classpath )
+    fi
+
+    log "Starte native-image Build (kann mehrere Minuten dauern)..."
+    if native-image "${NATIVE_ARGS[@]}" 2>&1 | tee /tmp/native-image-build.log; then
+      log "✅ Native Image erstellt: $RELEASE_DIR/bin/cm-migrator"
+    else
+      warn "⚠️  Native Image fehlgeschlagen. Log: /tmp/native-image-build.log"
+      warn "    Häufige Ursachen:"
+      warn "    - Reflection-Konfiguration fehlt (reflect-config.json)"
+      warn "    - Inkompatible Bibliotheken (IBM CM SDK)"
+      warn "    Tipp: Verwenden Sie --obfuscate --sign für maximalen Schutz ohne Native Image"
+    fi
+  fi
+else
+  log "[5/7] Native Image übersprungen"
+fi
+
+# -----------------------------
+# [6/7] Release-Paket zusammenstellen
+# -----------------------------
+log "[6/7] Erstelle Release-Paket..."
+mkdir -p "$RELEASE_DIR"/{bin,lib,conf,webapp,data,reports}
+
+# JAR ins Release
+cp "$BUILD_JAR" "$RELEASE_DIR/bin/"
+
+# Shell-Skripte (ohne Build-Scripts)
+for script in start.sh verify.sh monitor.sh webgui.sh remigrate.sh; do
+  if [[ -f "$PROJECT_DIR/bin/$script" ]]; then
+    cp "$PROJECT_DIR/bin/$script" "$RELEASE_DIR/bin/"
+    chmod +x "$RELEASE_DIR/bin/$script"
+  fi
+done
+
+# Dependencies
+cp "$PROJECT_DIR/lib/"*.jar "$RELEASE_DIR/lib/" 2>/dev/null || true
+
+# Konfiguration (nur Examples)
+cp "$PROJECT_DIR/conf/migration.properties.example" "$RELEASE_DIR/conf/" 2>/dev/null || true
+cp "$PROJECT_DIR/conf/log4j2.xml" "$RELEASE_DIR/conf/" 2>/dev/null || true
+[[ -f "$PROJECT_DIR/conf/cmbicmsrvs.ini" ]] && \
+  cp "$PROJECT_DIR/conf/cmbicmsrvs.ini" "$RELEASE_DIR/conf/"
+
+# WebApp
+cp -r "$PROJECT_DIR/webapp/"* "$RELEASE_DIR/webapp/" 2>/dev/null || true
+
+# README erstellen
+cat > "$RELEASE_DIR/README.txt" <<'EOF'
+================================================================================
+IBM CM Migrator v2.2
+================================================================================
+
+SCHNELLSTART
+------------
+1. Konfiguration erstellen:
+   cp conf/migration.properties.example conf/migration.properties
+
+2. Konfiguration anpassen (Verbindungsdaten, ItemTypes etc.)
+
+3. Migration starten:
+   ./bin/start.sh
+
+4. Oder WebGUI starten:
+   ./bin/webgui.sh
+   → Browser: http://localhost:8080
+
+VERZEICHNISSE
+-------------
+bin/        - Ausführbare Dateien und Skripte
+lib/        - Externe Bibliotheken
+conf/       - Konfigurationsdateien
+data/       - Journal-Datenbanken (wird automatisch erstellt)
+webapp/     - WebGUI Dashboard
+reports/    - Generierte Prüfprotokolle
+
+SUPPORT
+-------
+Siehe BETRIEBSHANDBUCH für vollständige Dokumentation.
+
+================================================================================
+EOF
+
+# Version-Info
+{
+  echo "$VERSION"
+  echo "Build: $(date '+%Y-%m-%d %H:%M:%S')"
+  echo "Host: $(hostname)"
+} > "$RELEASE_DIR/VERSION"
+
+# -----------------------------
+# [7/7] Archiv erstellen
+# -----------------------------
+log "[7/7] Erstelle Archive..."
+cd "$BUILD_DIR"
+
+# TAR.GZ (für Linux)
+tar -czf "${RELEASE_NAME}.tar.gz" "$RELEASE_NAME"
+log "✅ ${RELEASE_NAME}.tar.gz erstellt"
+
+# ZIP (für Windows)
+if command -v zip &>/dev/null; then
+  zip -rq "${RELEASE_NAME}.zip" "$RELEASE_NAME"
+  log "✅ ${RELEASE_NAME}.zip erstellt"
+fi
+
+# Checksummen
+if command -v sha256sum &>/dev/null; then
+  sha256sum "${RELEASE_NAME}.tar.gz" > "${RELEASE_NAME}.tar.gz.sha256"
+  [[ -f "${RELEASE_NAME}.zip" ]] && sha256sum "${RELEASE_NAME}.zip" > "${RELEASE_NAME}.zip.sha256"
+elif command -v shasum &>/dev/null; then
+  shasum -a 256 "${RELEASE_NAME}.tar.gz" > "${RELEASE_NAME}.tar.gz.sha256"
+  [[ -f "${RELEASE_NAME}.zip" ]] && shasum -a 256 "${RELEASE_NAME}.zip" > "${RELEASE_NAME}.zip.sha256"
+else
+  warn "Kein sha256sum/shasum gefunden -> keine Checksummen erzeugt."
+fi
+
+log ""
+log "============================================="
+log " Release Build abgeschlossen!"
+log "============================================="
+log ""
+log "📦 Erstellte Dateien:"
+for f in "$BUILD_DIR/${RELEASE_NAME}".tar.gz "$BUILD_DIR/${RELEASE_NAME}".zip; do
+  [[ -f "$f" ]] && ls -lh "$f"
+done
+log ""
+log "📋 Paket-Inhalt:"
+log "   $(find "$RELEASE_DIR" -type f | wc -l) Dateien"
+log "   $(du -sh "$RELEASE_DIR" | cut -f1) Gesamtgröße"
+log ""
+log "🚀 Bereit für Deployment!"
+log ""

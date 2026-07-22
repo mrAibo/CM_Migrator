@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CM Migrator Process</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <style>
+    :root{--bg:#f6f7fb;--panel:#fff;--border:#e2e8f0;--text:#0f172a;--muted:#64748b;--accent:#f97316;--ok:#16a34a;--bad:#dc2626;--warn:#f59e0b;--blue:#2563eb;--shadow:0 10px 28px rgba(15,23,42,.08)}
+    *{box-sizing:border-box} body{margin:0;background:var(--bg);font-family:Inter,system-ui,sans-serif;color:var(--text)}
+    .wrap{max-width:1180px;margin:24px auto;padding:0 18px}.top{background:#0f172a;color:#fff;border-radius:18px;padding:20px;box-shadow:var(--shadow);display:flex;justify-content:space-between;gap:18px;align-items:flex-start}
+    h1{margin:0;font-size:22px}.sub{margin-top:6px;color:#cbd5e1;font-family:JetBrains Mono,monospace;font-size:12px}.badge{padding:7px 12px;border-radius:999px;font-weight:800;font-size:12px;background:var(--warn);color:#fff}.badge.RUNNING,.badge.STARTING{background:var(--ok)}.badge.COMPLETED{background:var(--blue)}.badge.FAILED{background:var(--bad)}.badge.STOPPED,.badge.STOPPING{background:#64748b}
+    .grid{display:grid;grid-template-columns:1fr 340px;gap:18px;margin-top:18px}@media(max-width:900px){.grid{grid-template-columns:1fr}}
+    .card{background:var(--panel);border:1px solid var(--border);border-radius:16px;padding:18px;box-shadow:var(--shadow);margin-bottom:18px}.card h3{margin:0 0 14px;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.12em}.kv{display:grid;gap:10px}.row{display:flex;justify-content:space-between;gap:12px;padding:10px 12px;border:1px solid var(--border);border-radius:12px;background:#f8fafc}.k{font-size:12px;color:var(--muted)}.v{font-size:12px;font-family:JetBrains Mono,monospace;font-weight:700;text-align:right;word-break:break-word}.timeline{display:grid;gap:10px}.step{display:flex;gap:12px;align-items:center;padding:12px;border:1px solid var(--border);border-radius:12px;background:#f8fafc}.dot{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:#e2e8f0;font-weight:800}.step.active .dot{background:#dcfce7;color:var(--ok)}.step.done .dot{background:#dbeafe;color:var(--blue)}
+    .links{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}@media(max-width:600px){.links{grid-template-columns:1fr}}.links a,.btn{display:block;text-decoration:none;text-align:center;border:none;border-radius:10px;padding:11px 12px;font-weight:800;cursor:pointer}.links a{background:#fff7ed;color:#ea580c;border:1px solid #fed7aa}.btn-stop{background:var(--bad);color:#fff}.btn-back{background:#475569;color:#fff}.log{font-family:JetBrains Mono,monospace;background:#0b1220;color:#e5e7eb;border-radius:14px;padding:14px;min-height:300px;max-height:520px;overflow:auto;font-size:12px;line-height:1.6;white-space:pre-wrap}.muted{color:var(--muted)}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="top">
+      <div>
+        <h1>CM Migrator Process</h1>
+        <div class="sub" id="runId">runId: --</div>
+        <div class="sub" id="profile">profile: --</div>
+      </div>
+      <div class="badge" id="status">LOADING</div>
+    </div>
+
+    <div class="grid">
+      <main>
+        <div class="card">
+          <h3>Workflow</h3>
+          <div class="timeline" id="timeline">
+            <div class="step active"><div class="dot">▶</div><div><b>Loading process state</b><br><span class="muted">Waiting for API response</span></div></div>
+          </div>
+        </div>
+        <div class="card">
+          <h3>Live log</h3>
+          <div class="log" id="log">Loading...</div>
+        </div>
+      </main>
+      <aside>
+        <div class="card">
+          <h3>Process details</h3>
+          <div class="kv">
+            <div class="row"><div class="k">Mode</div><div class="v" id="mode">--</div></div>
+            <div class="row"><div class="k">Step</div><div class="v" id="step">--</div></div>
+            <div class="row"><div class="k">Config</div><div class="v" id="config">--</div></div>
+            <div class="row"><div class="k">Started</div><div class="v" id="started">--</div></div>
+            <div class="row"><div class="k">Finished</div><div class="v" id="finished">--</div></div>
+          </div>
+        </div>
+        <div class="card">
+          <h3>Links</h3>
+          <div class="links">
+            <a id="dashboard" href="#" target="_blank">Dashboard</a>
+            <a id="migrationReport" href="#" target="_blank">Migration report</a>
+            <a id="verificationReport" href="#" target="_blank">Verification report</a>
+            <a href="/" target="_self">Back to WebGUI</a>
+          </div>
+        </div>
+        <div class="card">
+          <h3>Actions</h3>
+          <button class="btn btn-stop" onclick="stopProcess()">Stop gracefully</button>
+          <div style="height:10px"></div>
+          <button class="btn btn-back" onclick="copyLink()">Copy process link</button>
+        </div>
+      </aside>
+    </div>
+  </div>
+<script>
+const params = new URLSearchParams(location.search);
+const runId = params.get('runId') || '';
+let lastStatus = '';
+function fmtTime(ms){ if(!ms) return '--'; return new Date(ms).toLocaleString(); }
+function esc(s){ return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function stepHtml(p){
+  const mode = (p.mode || '').toLowerCase();
+  const current = (p.currentStep || '').toLowerCase();
+  let steps = mode === 'safe' ? ['migration','verification','reports'] : [mode || 'operation','reports'];
+  return steps.map((s,i)=>{
+    const active = current.includes(s) || (i===0 && ['RUNNING','STARTING'].includes(p.status));
+    const done = p.status === 'COMPLETED' || (!active && i===0 && current && !current.includes(s));
+    const icon = done ? '✓' : active ? '▶' : '⏳';
+    return `<div class="step ${active?'active':''} ${done?'done':''}"><div class="dot">${icon}</div><div><b>${esc(s)}</b><br><span class="muted">${active?esc(p.currentStep):done?'completed':'waiting'}</span></div></div>`;
+  }).join('');
+}
+async function poll(){
+  try{
+    const url = '/api/process' + (runId ? ('?runId=' + encodeURIComponent(runId)) : '');
+    const r = await fetch(url,{cache:'no-store'});
+    const data = await r.json();
+    const p = data.process;
+    if(!p){ document.getElementById('log').textContent='No process found.'; return; }
+    document.getElementById('runId').textContent='runId: ' + p.runId;
+    document.getElementById('profile').textContent='profile: ' + (p.profile || '--');
+    const status = document.getElementById('status'); status.textContent=p.status; status.className='badge ' + p.status;
+    document.getElementById('mode').textContent=p.mode || '--';
+    document.getElementById('step').textContent=p.currentStep || '--';
+    document.getElementById('config').textContent=p.configFile || '--';
+    document.getElementById('started').textContent=fmtTime(p.startedAtMs);
+    document.getElementById('finished').textContent=fmtTime(p.finishedAtMs);
+    document.getElementById('dashboard').href=p.dashboardUrl || '#';
+    document.getElementById('migrationReport').href=p.migrationReportUrl || '#';
+    document.getElementById('verificationReport').href=p.verificationReportUrl || '#';
+    document.getElementById('timeline').innerHTML=stepHtml(p);
+    document.getElementById('log').textContent=(p.log || []).join('\n') || 'No log entries yet.';
+    if(lastStatus !== p.status){ lastStatus = p.status; }
+  }catch(e){ document.getElementById('log').textContent='API error: ' + e; }
+}
+async function stopProcess(){
+  if(!confirm('Stop this process gracefully?')) return;
+  await fetch('/api/process/stop' + (runId ? ('?runId=' + encodeURIComponent(runId)) : ''), {method:'POST'});
+  poll();
+}
+function copyLink(){ navigator.clipboard?.writeText(location.href); }
+setInterval(poll, 2000); poll();
+</script>
+</body>
+</html>
