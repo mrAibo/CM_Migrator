@@ -240,7 +240,7 @@ workerFailureState.throwIfPresent("Migration worker failed");
 | Reports und E-Mail werden bei Worker-Fehler unterdrückt | erfüllt |
 | Cleanup erfolgt vor erneuter Fehlerauslösung | erfüllt |
 | Pool und Journal werden nicht geschlossen, solange Discovery-/Worker-Tasks laufen | erfüllt |
-| Kein `shutdownNow()` im Worker-Fehler-, WebGUI- oder Timeout-Cleanup-Pfad | erfüllt |
+| Kein `shutdownNow()` im regulären Worker-Fehler-, WebGUI- oder Timeout-Cleanup-Pfad; der direkte Producer-Interrupt-Pfad behält das bestehende `shutdownNow()` bei. | erfüllt |
 | Normaler Erfolgspfad bleibt funktional erhalten | erfüllt |
 | Externer Shutdown bleibt ein Abbruch | erfüllt |
 | Keine neuen Dependencies | erfüllt |
