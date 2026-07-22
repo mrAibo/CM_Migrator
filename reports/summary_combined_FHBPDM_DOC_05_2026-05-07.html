@@ -1,0 +1,687 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gesamtprotokoll - FHBPDM_DOC_05</title>
+    <style>
+        /* ===== FONT IMPORT ===== */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        
+        /* ===== PRINT OPTIMIZATION ===== */
+        @page {
+            size: A4 portrait;
+            margin: 15mm 12mm 15mm 12mm;
+        }
+        
+        @media print {
+            body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            .page-break { page-break-before: always; }
+            .no-print { display: none !important; }
+        }
+        
+        /* ===== BASE STYLES ===== */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Inter', 'Roboto', 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+            font-size: 9pt;
+            line-height: 1.4;
+            color: #1e293b;
+            background: #f1f5f9;
+        }
+        
+        /* ===== DIGITAL PAPER CONTAINER ===== */
+        .paper {
+            width: 210mm;
+            min-height: 297mm;
+            margin: 20px auto;
+            padding: 18mm 15mm 15mm 15mm;
+            background: #ffffff;
+            /* box-shadow: 0 4px 24px rgba(0, 0, 0, 0.12), 0 1px 3px rgba(0, 0, 0, 0.08); */
+            position: relative;
+        }
+        
+        /* Paper texture effect */
+        .paper::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: repeating-linear-gradient(
+                0deg,
+                transparent,
+                transparent 24px,
+                #f8fafc 24px,
+                #f8fafc 25px
+            );
+            pointer-events: none;
+            opacity: 0.2;
+        }
+        
+        /* ===== HEADER ===== */
+        .header {
+            display: grid;
+            grid-template-columns: auto 1fr auto;
+            gap: 15px;
+            align-items: center;
+            padding-bottom: 12px;
+            border-bottom: 3px solid #0f172a;
+            margin-bottom: 15px;
+            position: relative;
+            z-index: 1;
+        }
+        
+        .logo-container {
+            width: 120px;
+            height: 50px;
+            display: flex;
+            align-items: center;
+            justify-content: flex-start;
+        }
+        
+        .logo-placeholder {
+            font-size: 7pt;
+            color: #94a3b8;
+            text-align: center;
+        }
+        
+        .header-content h1 {
+            font-size: 16pt;
+            font-weight: 700;
+            color: #0f172a;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 2px;
+        }
+        
+        .header-content .subtitle {
+            font-size: 9pt;
+            color: #64748b;
+            font-weight: 400;
+        }
+        
+        .header-content .doc-type {
+            display: inline-block;
+            background: linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%);
+            color: white;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 7pt;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-top: 4px;
+        }
+        
+        .protocol-id {
+            text-align: right;
+            font-size: 8pt;
+        }
+        
+        .protocol-id .label {
+            color: #94a3b8;
+            font-size: 6pt;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .protocol-id .value {
+            font-family: 'Courier New', monospace;
+            font-weight: 600;
+            color: #0f172a;
+        }
+        
+        /* ===== META INFORMATION BOX ===== */
+        .meta-box {
+            background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            padding: 12px;
+            margin-bottom: 15px;
+            position: relative;
+            z-index: 1;
+        }
+        
+        .meta-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px 16px;
+        }
+        
+        .meta-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 4px 0;
+            border-bottom: 1px dotted #cbd5e1;
+        }
+        
+        .meta-item:last-child {
+            border-bottom: none;
+        }
+        
+        .meta-label {
+            color: #64748b;
+            font-size: 8pt;
+            font-weight: 500;
+        }
+        
+        .meta-value {
+            font-weight: 600;
+            color: #0f172a;
+            font-size: 8pt;
+        }
+        
+        .meta-value.highlight {
+            color: #8b5cf6;
+        }
+        
+        /* ===== SECTION STYLES ===== */
+        .section {
+            margin-bottom: 15px;
+            position: relative;
+            z-index: 1;
+        }
+        
+        .section-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+        
+        .section-header h2 {
+            font-size: 10pt;
+            font-weight: 700;
+            color: #0f172a;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+        }
+        
+        .section-header::after {
+            content: '';
+            flex: 1;
+            height: 2px;
+            background: linear-gradient(90deg, #8b5cf6 0%, transparent 100%);
+        }
+        
+        .section-header.migration::after {
+            background: linear-gradient(90deg, #f97316 0%, transparent 100%);
+        }
+        
+        .section-header.verification::after {
+            background: linear-gradient(90deg, #3b82f6 0%, transparent 100%);
+        }
+        
+        /* ===== TWO COLUMN LAYOUT ===== */
+        .two-columns {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+        
+        .column-box {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            padding: 12px;
+        }
+        
+        .column-box.migration {
+            border-left: 3px solid #f97316;
+        }
+        
+        .column-box.verification {
+            border-left: 3px solid #3b82f6;
+        }
+        
+        .column-title {
+            font-size: 9pt;
+            font-weight: 700;
+            color: #0f172a;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        
+        .column-title .icon {
+            width: 20px;
+            height: 20px;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10pt;
+        }
+        
+        .column-title .icon.migration {
+            background: #fff7ed;
+            color: #f97316;
+        }
+        
+        .column-title .icon.verification {
+            background: #eff6ff;
+            color: #3b82f6;
+        }
+        
+        /* ===== STATISTICS GRID ===== */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 8px;
+        }
+        
+        .stats-grid.four-cols {
+            grid-template-columns: repeat(4, 1fr);
+        }
+        
+        .stat-card {
+            background: white;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            padding: 10px 8px;
+            text-align: center;
+        }
+        
+        .stat-card.large {
+            grid-column: span 2;
+        }
+        
+        .stat-value {
+            font-size: 18pt;
+            font-weight: 700;
+            color: #0f172a;
+            line-height: 1.2;
+        }
+        
+        .stat-value.success { color: #16a34a; }
+        .stat-value.error { color: #dc2626; }
+        .stat-value.warning { color: #f97316; }
+        .stat-value.info { color: #3b82f6; }
+        .stat-value.neutral { color: #64748b; }
+        
+        .stat-label {
+            font-size: 7pt;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-top: 2px;
+            font-weight: 500;
+        }
+        
+        /* ===== SUCCESS RATE MINI ===== */
+        .success-rate-mini {
+            background: white;
+            border: 2px solid #16a34a;
+            border-radius: 6px;
+            padding: 10px;
+            text-align: center;
+            margin-top: 10px;
+        }
+        
+        .success-rate-mini.warning {
+            border-color: #f97316;
+        }
+        
+        .success-rate-mini.error {
+            border-color: #dc2626;
+        }
+        
+        .success-rate-mini .rate-label {
+            font-size: 7pt;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .success-rate-mini .rate-value {
+            font-size: 20pt;
+            font-weight: 700;
+            color: #16a34a;
+        }
+        
+        .success-rate-mini.warning .rate-value { color: #f97316; }
+        .success-rate-mini.error .rate-value { color: #dc2626; }
+        
+        /* ===== OVERALL STATUS ===== */
+        .overall-status {
+            background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
+            border: 2px solid #16a34a;
+            border-radius: 8px;
+            padding: 15px;
+            text-align: center;
+            margin-top: 15px;
+        }
+        
+        .overall-status.warning {
+            background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+            border-color: #f97316;
+        }
+        
+        .overall-status.error {
+            background: linear-gradient(135deg, #fef2f2 0%, #fecaca 100%);
+            border-color: #dc2626;
+        }
+        
+        .overall-status .status-icon {
+            font-size: 24pt;
+            margin-bottom: 5px;
+        }
+        
+        .overall-status .status-text {
+            font-size: 14pt;
+            font-weight: 700;
+            color: #16a34a;
+        }
+        
+        .overall-status.warning .status-text { color: #f97316; }
+        .overall-status.error .status-text { color: #dc2626; }
+        
+        .overall-status .status-detail {
+            font-size: 8pt;
+            color: #64748b;
+            margin-top: 4px;
+        }
+        
+        /* ===== ERROR SUMMARY ===== */
+        .error-summary {
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+            border-radius: 6px;
+            padding: 10px;
+            margin-top: 10px;
+        }
+        
+        .error-summary.empty {
+            background: #f0fdf4;
+            border-color: #bbf7d0;
+            text-align: center;
+            color: #16a34a;
+            font-style: italic;
+        }
+        
+        .error-summary .error-count {
+            font-weight: 700;
+            color: #dc2626;
+            margin-bottom: 5px;
+        }
+        
+        .error-summary .error-list {
+            font-family: 'Courier New', monospace;
+            font-size: 7pt;
+            color: #dc2626;
+            max-height: 60px;
+            overflow-y: auto;
+        }
+        
+        /* ===== SIGNATURE BOX ===== */
+        .signature-box {
+            border: 2px solid #0f172a;
+            border-radius: 6px;
+            padding: 15px;
+            margin-top: 20px;
+            background: white;
+            position: relative;
+            z-index: 1;
+        }
+        
+        .signature-box h3 {
+            font-size: 10pt;
+            font-weight: 700;
+            color: #0f172a;
+            margin-bottom: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+        }
+        
+        .signature-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            margin-bottom: 12px;
+        }
+        
+        .signature-field label {
+            display: block;
+            font-size: 7pt;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 4px;
+        }
+        
+        .signature-line {
+            border-bottom: 1px solid #0f172a;
+            height: 28px;
+        }
+        
+        .remarks-field {
+            margin-top: 12px;
+        }
+        
+        .remarks-field label {
+            display: block;
+            font-size: 7pt;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 4px;
+        }
+        
+        .remarks-box {
+            border: 1px solid #e2e8f0;
+            border-radius: 4px;
+            min-height: 40px;
+            background: #f8fafc;
+        }
+        
+        /* ===== FOOTER ===== */
+        .footer {
+            margin-top: 20px;
+            padding-top: 10px;
+            border-top: 1px solid #e2e8f0;
+            text-align: center;
+            font-size: 7pt;
+            color: #94a3b8;
+            position: relative;
+            z-index: 1;
+        }
+        
+        .footer-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            text-align: center;
+        }
+        
+        /* ===== WATERMARK ===== */
+        .watermark {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%) rotate(-30deg);
+            font-size: 60pt;
+            color: rgba(0, 0, 0, 0.02);
+            font-weight: 700;
+            text-transform: uppercase;
+            pointer-events: none;
+            white-space: nowrap;
+        }
+    </style>
+</head>
+<body>
+    <div class="paper">
+        <!-- Watermark -->
+        <div class="watermark">GESAMTPROTOKOLL</div>
+        
+        <!-- Header -->
+        <header class="header">
+            <div class="logo-container">
+                <img src="data:image/png;base64,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" alt="Company Logo" style="max-width: 100%; max-height: 100%; object-fit: contain;">
+            </div>
+            <div class="header-content">
+                <h1>Gesamtprotokoll</h1>
+                <div class="subtitle">AOK</div>
+                <span class="doc-type">Migration + Verifikation</span>
+            </div>
+            <div class="protocol-id">
+                <div class="label">Protokoll-ID</div>
+                <div class="value">SUM-37483714</div>
+            </div>
+        </header>
+        
+        <!-- Meta Information -->
+        <div class="meta-box">
+            <div class="meta-grid">
+                <div class="meta-item">
+                    <span class="meta-label">ItemType (Quelle)</span>
+                    <span class="meta-value highlight">FHBPDM_DOC_05</span>
+                </div>
+                <div class="meta-item">
+                    <span class="meta-label">ItemType (Ziel)</span>
+                    <span class="meta-value highlight">FFEPDM_DOC_99</span>
+                </div>
+                <div class="meta-item">
+                    <span class="meta-label">Erstellungsdatum</span>
+                    <span class="meta-value">07.05.2026</span>
+                </div>
+                <div class="meta-item">
+                    <span class="meta-label">Quellsystem (SSID)</span>
+                    <span class="meta-value">LSDB</span>
+                </div>
+                <div class="meta-item">
+                    <span class="meta-label">Zielsystem (SSID)</span>
+                    <span class="meta-value">AOKHB-ITU</span>
+                </div>
+                <div class="meta-item">
+                    <span class="meta-label">Erstellungszeit</span>
+                    <span class="meta-value">15:23:31</span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Two Column Statistics -->
+        <div class="two-columns">
+            <!-- Migration Column -->
+            <div class="column-box migration">
+                <div class="column-title">
+                    <span class="icon migration">▶</span>
+                    Migrationsstatistik
+                </div>
+                
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-value neutral">20462</div>
+                        <div class="stat-label">Gesamt</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value success">20108</div>
+                        <div class="stat-label">Erfolgreich</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value error">354</div>
+                        <div class="stat-label">Fehlgeschlagen</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value neutral">0</div>
+                        <div class="stat-label">Übersprungen</div>
+                    </div>
+                </div>
+                
+                <div class="success-rate-mini success">
+                    <div class="rate-label">Erfolgsrate</div>
+                    <div class="rate-value">98,27%</div>
+                </div>
+            </div>
+            
+            <!-- Verification Column -->
+            <div class="column-box verification">
+                <div class="column-title">
+                    <span class="icon verification">✓</span>
+                    Verifikationsstatistik
+                </div>
+                
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-value info">20409</div>
+                        <div class="stat-label">Geprüft</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value success">20055</div>
+                        <div class="stat-label">Hash OK</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value error">354</div>
+                        <div class="stat-label">Mismatch</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value warning">0</div>
+                        <div class="stat-label">Verwaist</div>
+                    </div>
+                </div>
+                
+                <div class="success-rate-mini success">
+                    <div class="rate-label">Verifikationsrate</div>
+                    <div class="rate-value">98,27%</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Overall Status -->
+        <div class="overall-status success">
+            <div class="status-icon">✓</div>
+            <div class="status-text">Erfolgreich</div>
+            <div class="status-detail">Migration: 98,27% | Verifikation: 98,27%</div>
+        </div>
+        
+        <!-- Error Summary Section -->
+        <section class="section">
+            <div class="section-header">
+                <h2>Fehlerzusammenfassung</h2>
+            </div>
+            
+            <table class="error-table"><thead><tr><th>ItemType</th><th>Fehleranzahl</th><th>Hauptfehler</th></tr></thead><tbody><tr><td>FHBPDM_DOC_05</td><td>708</td><td>Siehe Detailprotokoll</td></tr></tbody></table>
+        </section>
+        
+        <!-- Signature Box -->
+        <div class="signature-box">
+            <h3>Prüfbestätigung</h3>
+            <div class="signature-grid">
+                <div class="signature-field">
+                    <label>Datum</label>
+                    <div class="signature-line"></div>
+                </div>
+                <div class="signature-field">
+                    <label>Name des Prüfers</label>
+                    <div class="signature-line"></div>
+                </div>
+                <div class="signature-field">
+                    <label>Unterschrift</label>
+                    <div class="signature-line"></div>
+                </div>
+            </div>
+            <div class="remarks-field">
+                <label>Bemerkungen</label>
+                <div class="remarks-box"></div>
+            </div>
+        </div>
+        
+        <!-- Footer -->
+        <footer class="footer">
+            <div class="footer-grid">
+                <div>CM Migrator v2.2.0</div>
+                <div>Generiert am 07.05.2026 um 15:23:31</div>
+                <div>Seite 1 von 1</div>
+            </div>
+        </footer>
+    </div>
+</body>
+</html>

@@ -1,0 +1,687 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gesamtprotokoll - {{ITEMTYPE_SOURCE}}</title>
+    <style>
+        /* ===== FONT IMPORT ===== */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        
+        /* ===== PRINT OPTIMIZATION ===== */
+        @page {
+            size: A4 portrait;
+            margin: 15mm 12mm 15mm 12mm;
+        }
+        
+        @media print {
+            body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            .page-break { page-break-before: always; }
+            .no-print { display: none !important; }
+        }
+        
+        /* ===== BASE STYLES ===== */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Inter', 'Roboto', 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+            font-size: 9pt;
+            line-height: 1.4;
+            color: #1e293b;
+            background: #f1f5f9;
+        }
+        
+        /* ===== DIGITAL PAPER CONTAINER ===== */
+        .paper {
+            width: 210mm;
+            min-height: 297mm;
+            margin: 20px auto;
+            padding: 18mm 15mm 15mm 15mm;
+            background: #ffffff;
+            /* box-shadow: 0 4px 24px rgba(0, 0, 0, 0.12), 0 1px 3px rgba(0, 0, 0, 0.08); */
+            position: relative;
+        }
+        
+        /* Paper texture effect */
+        .paper::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: repeating-linear-gradient(
+                0deg,
+                transparent,
+                transparent 24px,
+                #f8fafc 24px,
+                #f8fafc 25px
+            );
+            pointer-events: none;
+            opacity: 0.2;
+        }
+        
+        /* ===== HEADER ===== */
+        .header {
+            display: grid;
+            grid-template-columns: auto 1fr auto;
+            gap: 15px;
+            align-items: center;
+            padding-bottom: 12px;
+            border-bottom: 3px solid #0f172a;
+            margin-bottom: 15px;
+            position: relative;
+            z-index: 1;
+        }
+        
+        .logo-container {
+            width: 120px;
+            height: 50px;
+            display: flex;
+            align-items: center;
+            justify-content: flex-start;
+        }
+        
+        .logo-placeholder {
+            font-size: 7pt;
+            color: #94a3b8;
+            text-align: center;
+        }
+        
+        .header-content h1 {
+            font-size: 16pt;
+            font-weight: 700;
+            color: #0f172a;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 2px;
+        }
+        
+        .header-content .subtitle {
+            font-size: 9pt;
+            color: #64748b;
+            font-weight: 400;
+        }
+        
+        .header-content .doc-type {
+            display: inline-block;
+            background: linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%);
+            color: white;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 7pt;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-top: 4px;
+        }
+        
+        .protocol-id {
+            text-align: right;
+            font-size: 8pt;
+        }
+        
+        .protocol-id .label {
+            color: #94a3b8;
+            font-size: 6pt;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .protocol-id .value {
+            font-family: 'Courier New', monospace;
+            font-weight: 600;
+            color: #0f172a;
+        }
+        
+        /* ===== META INFORMATION BOX ===== */
+        .meta-box {
+            background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            padding: 12px;
+            margin-bottom: 15px;
+            position: relative;
+            z-index: 1;
+        }
+        
+        .meta-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px 16px;
+        }
+        
+        .meta-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 4px 0;
+            border-bottom: 1px dotted #cbd5e1;
+        }
+        
+        .meta-item:last-child {
+            border-bottom: none;
+        }
+        
+        .meta-label {
+            color: #64748b;
+            font-size: 8pt;
+            font-weight: 500;
+        }
+        
+        .meta-value {
+            font-weight: 600;
+            color: #0f172a;
+            font-size: 8pt;
+        }
+        
+        .meta-value.highlight {
+            color: #8b5cf6;
+        }
+        
+        /* ===== SECTION STYLES ===== */
+        .section {
+            margin-bottom: 15px;
+            position: relative;
+            z-index: 1;
+        }
+        
+        .section-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+        
+        .section-header h2 {
+            font-size: 10pt;
+            font-weight: 700;
+            color: #0f172a;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+        }
+        
+        .section-header::after {
+            content: '';
+            flex: 1;
+            height: 2px;
+            background: linear-gradient(90deg, #8b5cf6 0%, transparent 100%);
+        }
+        
+        .section-header.migration::after {
+            background: linear-gradient(90deg, #f97316 0%, transparent 100%);
+        }
+        
+        .section-header.verification::after {
+            background: linear-gradient(90deg, #3b82f6 0%, transparent 100%);
+        }
+        
+        /* ===== TWO COLUMN LAYOUT ===== */
+        .two-columns {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+        
+        .column-box {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            padding: 12px;
+        }
+        
+        .column-box.migration {
+            border-left: 3px solid #f97316;
+        }
+        
+        .column-box.verification {
+            border-left: 3px solid #3b82f6;
+        }
+        
+        .column-title {
+            font-size: 9pt;
+            font-weight: 700;
+            color: #0f172a;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        
+        .column-title .icon {
+            width: 20px;
+            height: 20px;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10pt;
+        }
+        
+        .column-title .icon.migration {
+            background: #fff7ed;
+            color: #f97316;
+        }
+        
+        .column-title .icon.verification {
+            background: #eff6ff;
+            color: #3b82f6;
+        }
+        
+        /* ===== STATISTICS GRID ===== */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 8px;
+        }
+        
+        .stats-grid.four-cols {
+            grid-template-columns: repeat(4, 1fr);
+        }
+        
+        .stat-card {
+            background: white;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            padding: 10px 8px;
+            text-align: center;
+        }
+        
+        .stat-card.large {
+            grid-column: span 2;
+        }
+        
+        .stat-value {
+            font-size: 18pt;
+            font-weight: 700;
+            color: #0f172a;
+            line-height: 1.2;
+        }
+        
+        .stat-value.success { color: #16a34a; }
+        .stat-value.error { color: #dc2626; }
+        .stat-value.warning { color: #f97316; }
+        .stat-value.info { color: #3b82f6; }
+        .stat-value.neutral { color: #64748b; }
+        
+        .stat-label {
+            font-size: 7pt;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-top: 2px;
+            font-weight: 500;
+        }
+        
+        /* ===== SUCCESS RATE MINI ===== */
+        .success-rate-mini {
+            background: white;
+            border: 2px solid #16a34a;
+            border-radius: 6px;
+            padding: 10px;
+            text-align: center;
+            margin-top: 10px;
+        }
+        
+        .success-rate-mini.warning {
+            border-color: #f97316;
+        }
+        
+        .success-rate-mini.error {
+            border-color: #dc2626;
+        }
+        
+        .success-rate-mini .rate-label {
+            font-size: 7pt;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .success-rate-mini .rate-value {
+            font-size: 20pt;
+            font-weight: 700;
+            color: #16a34a;
+        }
+        
+        .success-rate-mini.warning .rate-value { color: #f97316; }
+        .success-rate-mini.error .rate-value { color: #dc2626; }
+        
+        /* ===== OVERALL STATUS ===== */
+        .overall-status {
+            background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
+            border: 2px solid #16a34a;
+            border-radius: 8px;
+            padding: 15px;
+            text-align: center;
+            margin-top: 15px;
+        }
+        
+        .overall-status.warning {
+            background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+            border-color: #f97316;
+        }
+        
+        .overall-status.error {
+            background: linear-gradient(135deg, #fef2f2 0%, #fecaca 100%);
+            border-color: #dc2626;
+        }
+        
+        .overall-status .status-icon {
+            font-size: 24pt;
+            margin-bottom: 5px;
+        }
+        
+        .overall-status .status-text {
+            font-size: 14pt;
+            font-weight: 700;
+            color: #16a34a;
+        }
+        
+        .overall-status.warning .status-text { color: #f97316; }
+        .overall-status.error .status-text { color: #dc2626; }
+        
+        .overall-status .status-detail {
+            font-size: 8pt;
+            color: #64748b;
+            margin-top: 4px;
+        }
+        
+        /* ===== ERROR SUMMARY ===== */
+        .error-summary {
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+            border-radius: 6px;
+            padding: 10px;
+            margin-top: 10px;
+        }
+        
+        .error-summary.empty {
+            background: #f0fdf4;
+            border-color: #bbf7d0;
+            text-align: center;
+            color: #16a34a;
+            font-style: italic;
+        }
+        
+        .error-summary .error-count {
+            font-weight: 700;
+            color: #dc2626;
+            margin-bottom: 5px;
+        }
+        
+        .error-summary .error-list {
+            font-family: 'Courier New', monospace;
+            font-size: 7pt;
+            color: #dc2626;
+            max-height: 60px;
+            overflow-y: auto;
+        }
+        
+        /* ===== SIGNATURE BOX ===== */
+        .signature-box {
+            border: 2px solid #0f172a;
+            border-radius: 6px;
+            padding: 15px;
+            margin-top: 20px;
+            background: white;
+            position: relative;
+            z-index: 1;
+        }
+        
+        .signature-box h3 {
+            font-size: 10pt;
+            font-weight: 700;
+            color: #0f172a;
+            margin-bottom: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+        }
+        
+        .signature-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            margin-bottom: 12px;
+        }
+        
+        .signature-field label {
+            display: block;
+            font-size: 7pt;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 4px;
+        }
+        
+        .signature-line {
+            border-bottom: 1px solid #0f172a;
+            height: 28px;
+        }
+        
+        .remarks-field {
+            margin-top: 12px;
+        }
+        
+        .remarks-field label {
+            display: block;
+            font-size: 7pt;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 4px;
+        }
+        
+        .remarks-box {
+            border: 1px solid #e2e8f0;
+            border-radius: 4px;
+            min-height: 40px;
+            background: #f8fafc;
+        }
+        
+        /* ===== FOOTER ===== */
+        .footer {
+            margin-top: 20px;
+            padding-top: 10px;
+            border-top: 1px solid #e2e8f0;
+            text-align: center;
+            font-size: 7pt;
+            color: #94a3b8;
+            position: relative;
+            z-index: 1;
+        }
+        
+        .footer-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            text-align: center;
+        }
+        
+        /* ===== WATERMARK ===== */
+        .watermark {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%) rotate(-30deg);
+            font-size: 60pt;
+            color: rgba(0, 0, 0, 0.02);
+            font-weight: 700;
+            text-transform: uppercase;
+            pointer-events: none;
+            white-space: nowrap;
+        }
+    </style>
+</head>
+<body>
+    <div class="paper">
+        <!-- Watermark -->
+        <div class="watermark">GESAMTPROTOKOLL</div>
+        
+        <!-- Header -->
+        <header class="header">
+            <div class="logo-container">
+                {{COMPANY_LOGO}}
+            </div>
+            <div class="header-content">
+                <h1>Gesamtprotokoll</h1>
+                <div class="subtitle">{{COMPANY_NAME}}</div>
+                <span class="doc-type">Migration + Verifikation</span>
+            </div>
+            <div class="protocol-id">
+                <div class="label">Protokoll-ID</div>
+                <div class="value">{{PROTOCOL_ID}}</div>
+            </div>
+        </header>
+        
+        <!-- Meta Information -->
+        <div class="meta-box">
+            <div class="meta-grid">
+                <div class="meta-item">
+                    <span class="meta-label">ItemType (Quelle)</span>
+                    <span class="meta-value highlight">{{ITEMTYPE_SOURCE}}</span>
+                </div>
+                <div class="meta-item">
+                    <span class="meta-label">ItemType (Ziel)</span>
+                    <span class="meta-value highlight">{{ITEMTYPE_DEST}}</span>
+                </div>
+                <div class="meta-item">
+                    <span class="meta-label">Erstellungsdatum</span>
+                    <span class="meta-value">{{GENERATED_DATE}}</span>
+                </div>
+                <div class="meta-item">
+                    <span class="meta-label">Quellsystem (SSID)</span>
+                    <span class="meta-value">{{SOURCE_SSID}}</span>
+                </div>
+                <div class="meta-item">
+                    <span class="meta-label">Zielsystem (SSID)</span>
+                    <span class="meta-value">{{DEST_SSID}}</span>
+                </div>
+                <div class="meta-item">
+                    <span class="meta-label">Erstellungszeit</span>
+                    <span class="meta-value">{{GENERATED_TIME}}</span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Two Column Statistics -->
+        <div class="two-columns">
+            <!-- Migration Column -->
+            <div class="column-box migration">
+                <div class="column-title">
+                    <span class="icon migration">▶</span>
+                    Migrationsstatistik
+                </div>
+                
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-value neutral">{{MIG_TOTAL}}</div>
+                        <div class="stat-label">Gesamt</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value success">{{MIG_SUCCESS}}</div>
+                        <div class="stat-label">Erfolgreich</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value error">{{MIG_FAILED}}</div>
+                        <div class="stat-label">Fehlgeschlagen</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value neutral">{{MIG_SKIPPED}}</div>
+                        <div class="stat-label">Übersprungen</div>
+                    </div>
+                </div>
+                
+                <div class="success-rate-mini {{MIG_SUCCESS_RATE_CLASS}}">
+                    <div class="rate-label">Erfolgsrate</div>
+                    <div class="rate-value">{{MIG_SUCCESS_RATE}}%</div>
+                </div>
+            </div>
+            
+            <!-- Verification Column -->
+            <div class="column-box verification">
+                <div class="column-title">
+                    <span class="icon verification">✓</span>
+                    Verifikationsstatistik
+                </div>
+                
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-value info">{{VER_TOTAL}}</div>
+                        <div class="stat-label">Geprüft</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value success">{{VER_OK}}</div>
+                        <div class="stat-label">Hash OK</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value error">{{VER_MISMATCH}}</div>
+                        <div class="stat-label">Mismatch</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value warning">{{VER_ORPHANED}}</div>
+                        <div class="stat-label">Verwaist</div>
+                    </div>
+                </div>
+                
+                <div class="success-rate-mini {{VER_SUCCESS_RATE_CLASS}}">
+                    <div class="rate-label">Verifikationsrate</div>
+                    <div class="rate-value">{{VER_SUCCESS_RATE}}%</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Overall Status -->
+        <div class="overall-status {{OVERALL_STATUS_CLASS}}">
+            <div class="status-icon">{{OVERALL_STATUS_ICON}}</div>
+            <div class="status-text">{{OVERALL_STATUS_TEXT}}</div>
+            <div class="status-detail">Migration: {{MIG_SUCCESS_RATE}}% | Verifikation: {{VER_SUCCESS_RATE}}%</div>
+        </div>
+        
+        <!-- Error Summary Section -->
+        <section class="section">
+            <div class="section-header">
+                <h2>Fehlerzusammenfassung</h2>
+            </div>
+            
+            {{ERROR_SUMMARY}}
+        </section>
+        
+        <!-- Signature Box -->
+        <div class="signature-box">
+            <h3>Prüfbestätigung</h3>
+            <div class="signature-grid">
+                <div class="signature-field">
+                    <label>Datum</label>
+                    <div class="signature-line"></div>
+                </div>
+                <div class="signature-field">
+                    <label>Name des Prüfers</label>
+                    <div class="signature-line"></div>
+                </div>
+                <div class="signature-field">
+                    <label>Unterschrift</label>
+                    <div class="signature-line"></div>
+                </div>
+            </div>
+            <div class="remarks-field">
+                <label>Bemerkungen</label>
+                <div class="remarks-box"></div>
+            </div>
+        </div>
+        
+        <!-- Footer -->
+        <footer class="footer">
+            <div class="footer-grid">
+                <div>CM Migrator v2.2.0</div>
+                <div>Generiert am {{GENERATED_DATE}} um {{GENERATED_TIME}}</div>
+                <div>Seite 1 von 1</div>
+            </div>
+        </footer>
+    </div>
+</body>
+</html>
