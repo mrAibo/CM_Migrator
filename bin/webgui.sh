@@ -3,7 +3,7 @@
 # CM Migrator v2.2 - WebGUI Starter
 # =============================================================================
 # Startet den eingebetteten HTTP-Server für das Web-Dashboard.
-# 
+#
 # Usage:
 #   ./bin/webgui.sh              # Standard: Port 8080
 #   ./bin/webgui.sh --port 9000  # Alternativer Port
@@ -11,6 +11,8 @@
 # Environment:
 #   CM_JAVA_OPTS   additional JVM flags (e.g. -Dcm.migrator.webgui.bindAll=true)
 # =============================================================================
+
+set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
@@ -38,6 +40,16 @@ JAR_FILE="bin/cm-migrator.jar"
 if [ ! -f "$JAR_FILE" ]; then
     echo "[ERROR] $JAR_FILE not found! Run ./bin/compile.sh first."
     exit 1
+fi
+
+# P0 containment: protect the standard WebGUI configuration path from the
+# verifier's unsafe boolean source-existence check. The definitive Java fix
+# will replace this temporary launcher barrier.
+DEFAULT_MIGRATION_CONFIG="conf/migration.properties"
+if [ -f "$DEFAULT_MIGRATION_CONFIG" ]; then
+    # shellcheck source=bin/cascade-delete-guard.sh
+    source "bin/cascade-delete-guard.sh"
+    assert_cascade_delete_disabled "$DEFAULT_MIGRATION_CONFIG"
 fi
 
 # Port aus Argumenten
