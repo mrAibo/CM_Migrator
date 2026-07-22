@@ -151,7 +151,7 @@ def patch_producer(data: bytes) -> bytes:
 
     data = replace_once(
         data,
-        """            logger.info("PRODUCER STATS Type={} Fetched={} Enqueued={} Skipped={} AvgFetchMs={} QueueDepth={}", 
+        """            logger.info("PRODUCER STATS Type={} Fetched={} Enqueued={} Skipped={} AvgFetchMs={} QueueDepth={}",\x20
                     sourceType, fetched, enqueued, skipped, avgFetch, queue.size());
 
         } catch (Exception e) {
