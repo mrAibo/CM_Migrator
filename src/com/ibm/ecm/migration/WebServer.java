@@ -529,7 +529,11 @@ public class WebServer {
         Path runConfig = null;
         boolean releaseRunSlot = true;
         try {
-            runConfig = createRunConfigSnapshot(configPath, requestedMode, state.runId);
+            runConfig = RunConfigSnapshot.create(
+                    configPath,
+                    requestedMode,
+                    state.runId,
+                    Paths.get("data", "webgui-runs"));
             String runConfigFile = runConfig.toString();
             String mode = requestedMode == null ? "migration" : requestedMode.toLowerCase();
 
@@ -587,6 +591,16 @@ public class WebServer {
             state.appendLog(state.message);
             logger.error("WebGUI operation failed", e);
         } finally {
+            try {
+                RunConfigSnapshot.cleanupIfSafe(runConfig, releaseRunSlot);
+            } catch (IOException cleanupError) {
+                logger.error("Could not remove terminal WebGUI run snapshot", cleanupError);
+                if ("COMPLETED".equals(state.status)) {
+                    state.status = "FAILED";
+                    state.message = "Operation completed but secure snapshot cleanup failed";
+                    state.appendLog(state.message);
+                }
+            }
             state.finishedAtMs = System.currentTimeMillis();
             if (releaseRunSlot) {
                 migrationRunning.set(false);
@@ -1010,35 +1024,11 @@ public class WebServer {
     }
 
     private Path createRunConfigSnapshot(Path sourceConfig, String mode, String runId) throws IOException {
-        Properties props = new Properties();
-        if (Files.exists(sourceConfig)) {
-            try (InputStream is = Files.newInputStream(sourceConfig)) {
-                props.load(is);
-            }
-        }
-
-        String normalized = mode == null ? "MIGRATE" : mode.trim().toUpperCase();
-        if ("MIGRATION".equals(normalized)) normalized = "MIGRATE";
-        if ("VERIFY".equals(normalized) || "VERIFICATION".equals(normalized)) {
-            // Verifier ignores OPERATION_MODE; keep it for traceability only.
-            props.setProperty("OPERATION_MODE", "VERIFY");
-        } else if ("DELETE".equals(normalized)) {
-            props.setProperty("OPERATION_MODE", "DELETE");
-        } else {
-            // SAFE and MIGRATE both need a migration config for the Main phase.
-            props.setProperty("OPERATION_MODE", "MIGRATE");
-        }
-
-        props.setProperty("WEBGUI_RUN_ID", runId);
-        props.setProperty("WEBGUI_SOURCE_CONFIG", sourceConfig.toString().replace('\\', '/'));
-
-        Path runDir = Paths.get("data", "webgui-runs");
-        Files.createDirectories(runDir);
-        Path runConfig = runDir.resolve(runId + ".properties");
-        try (OutputStream os = Files.newOutputStream(runConfig)) {
-            props.store(os, "CM Migrator WebGUI run snapshot");
-        }
-        return runConfig;
+        return RunConfigSnapshot.create(
+                sourceConfig,
+                mode,
+                runId,
+                Paths.get("data", "webgui-runs"));
     }
 
     private String processStateJson(ProcessState state, boolean includeLog) {
