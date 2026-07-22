@@ -1,0 +1,17 @@
+# IBM Content Manager server configuration template
+# Copy to conf/cmbicmsrvs.ini and keep the resulting file untracked.
+# Fill every installation-specific field from approved IBM CM documentation.
+
+ICMSERVER=
+ICMSERVERREPTYPE=
+ICMSCHEMA=
+ICMDBAUTH=
+ICMREMOTE=
+ICMHOSTNAME=
+ICMPORT=
+ICMREMOTEDB=
+ICMNODENAME=
+ICMOSTYPE=
+ICMJDBCDRIVER=
+ICMJDBCURL=
+ICMSSO=
