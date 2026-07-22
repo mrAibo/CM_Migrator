@@ -1,0 +1,67 @@
+package com.ibm.ecm.migration;
+
+public final class SourceLookupClassifierTest {
+    public static void main(String[] args) {
+        assertStatus(SourceLookupStatus.NOT_FOUND,
+                new RuntimeException("Item not found: PID-1"), "PID-1");
+        assertStatus(SourceLookupStatus.NOT_FOUND,
+                new RuntimeException("Object does not exist: PID-2"), "PID-2");
+        assertStatus(SourceLookupStatus.NOT_FOUND,
+                new RuntimeException("DKC_UNKNOWN while retrieving PID-3"), "PID-3");
+        assertStatus(SourceLookupStatus.NOT_FOUND,
+                new RuntimeException(null, new RuntimeException("Document no longer exists: PID-4")), "PID-4");
+
+        assertStatus(SourceLookupStatus.ERROR,
+                new RuntimeException("Host not found"), "PID-5");
+        assertStatus(SourceLookupStatus.ERROR,
+                new RuntimeException("Connection timed out"), "PID-6");
+        assertStatus(SourceLookupStatus.ERROR,
+                new RuntimeException("Permission denied"), "PID-7");
+        assertStatus(SourceLookupStatus.ERROR,
+                new RuntimeException("DKC_UNKNOWN while retrieving another PID"), "PID-8");
+        assertStatus(SourceLookupStatus.ERROR, null, "PID-9");
+        assertStatus(SourceLookupStatus.ERROR,
+                new RuntimeException("Item not found"), "PID-10");
+        assertStatus(SourceLookupStatus.ERROR,
+                new RuntimeException("Authentication failed"), "PID-11");
+        assertStatus(SourceLookupStatus.ERROR,
+                new RuntimeException("Object does not exist"), "PID-12");
+        assertStatus(SourceLookupStatus.ERROR,
+                new RuntimeException("Object not found: PID-10"), "PID-1");
+        assertStatus(SourceLookupStatus.ERROR,
+                new RuntimeException("Object not found: XPID-1Z"), "PID-1");
+        assertStatus(SourceLookupStatus.ERROR,
+                new RuntimeException("Authentication failed",
+                        new RuntimeException("Object not found: PID-1")), "PID-1");
+        assertStatus(SourceLookupStatus.ERROR,
+                new RuntimeException("Connection timed out",
+                        new RuntimeException("Object not found: PID-1")), "PID-1");
+        assertStatus(SourceLookupStatus.ERROR,
+                new RuntimeException("Lookup failed",
+                        new RuntimeException("Object not found: PID-1")), "PID-1");
+        assertStatus(SourceLookupStatus.ERROR,
+                new RuntimeException("Authentication failed; object not found: PID-1"), "PID-1");
+        assertStatus(SourceLookupStatus.ERROR,
+                new RuntimeException("Connection timed out; object not found: PID-1"), "PID-1");
+        assertStatus(SourceLookupStatus.ERROR,
+                new RuntimeException("Object not found: PID-1; permission denied"), "PID-1");
+        assertStatus(SourceLookupStatus.ERROR,
+                new RuntimeException("Object not foundPID-1"), "PID-1");
+
+        Throwable deepFailure = new RuntimeException("Authentication failed");
+        for (int i = 0; i < 16; i++) {
+            deepFailure = new RuntimeException("Object not found: PID-13", deepFailure);
+        }
+        assertStatus(SourceLookupStatus.ERROR, deepFailure, "PID-13");
+
+        System.out.println("SourceLookupClassifierTest: PASS");
+    }
+
+    private static void assertStatus(SourceLookupStatus expected, Throwable failure, String sourcePid) {
+        SourceLookupStatus actual = SourceLookupClassifier.fromFailure(failure, sourcePid);
+        if (actual != expected) {
+            throw new AssertionError("Expected " + expected + " but got " + actual
+                    + " for " + (failure == null ? "<null>" : failure.getMessage()));
+        }
+    }
+}
