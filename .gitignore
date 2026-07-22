@@ -59,3 +59,7 @@ Thumbs.db
 *.rej
 *.pre-round*
 *.java.a
+
+# Historical dated source/web snapshots
+src/**/*.java.[0-9][0-9].[0-9][0-9].[0-9][0-9]
+webapp/*.[0-9][0-9].[0-9][0-9].[0-9][0-9]

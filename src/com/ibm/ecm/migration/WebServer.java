@@ -1038,7 +1038,6 @@ public class WebServer {
         json.append("\"runId\":\"").append(escapeJson(state.runId)).append("\",");
         json.append("\"mode\":\"").append(escapeJson(state.mode)).append("\",");
         json.append("\"profile\":\"").append(escapeJson(state.profile)).append("\",");
-        json.append("\"configFile\":\"").append(escapeJson(state.configFile)).append("\",");
         json.append("\"status\":\"").append(escapeJson(state.status)).append("\",");
         json.append("\"currentStep\":\"").append(escapeJson(state.currentStep)).append("\",");
         json.append("\"message\":\"").append(escapeJson(state.message)).append("\",");
@@ -1234,6 +1233,12 @@ public class WebServer {
         StringBuilder json = new StringBuilder("{");
         boolean first = true;
         for (String key : props.stringPropertyNames()) {
+            String upper = key.toUpperCase();
+            if (upper.contains("PASSWORD") || upper.contains("SECRET")
+                    || upper.contains("TOKEN") || upper.contains("CREDENTIAL")
+                    || upper.contains("_CRYPT") || key.equals("WEBGUI_SOURCE_CONFIG")) {
+                continue;
+            }
             if (!first) json.append(",");
             first = false;
             json.append("\"").append(escapeJson(key)).append("\":\"")

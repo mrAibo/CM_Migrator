@@ -38,8 +38,8 @@ if "RunConfigSnapshot.create(" not in run:
     raise SystemExit("FAIL: WebGUI must use the secure snapshot creator")
 if "RunConfigSnapshot.cleanupIfSafe(runConfig, releaseRunSlot)" not in run:
     raise SystemExit("FAIL: snapshot cleanup must follow confirmed termination")
-if "WEBGUI_RUN_ID" in web or "WEBGUI_SOURCE_CONFIG" in web:
-    raise SystemExit("FAIL: unused run/path metadata must not be copied")
+if "WEBGUI_RUN_ID" in web or 'props.setProperty("WEBGUI_SOURCE_CONFIG"' in web:
+    raise SystemExit("FAIL: unused run/path metadata must not be set as snapshot properties")
 if "runConfig" in state_json or "webgui-runs" in state_json:
     raise SystemExit("FAIL: snapshot path must not reach process status JSON")
 if "props.store" in web[web.find("private Path createRunConfigSnapshot"):state_start]:
