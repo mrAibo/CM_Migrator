@@ -28,14 +28,27 @@ public class Main {
             configPath = args[0];
         }
 
+        ShutdownCoordinator.reset();
+        long graceSeconds = 60L;
         try {
+            graceSeconds = new MigrationConfig(configPath).getShutdownGraceSeconds();
+        } catch (Exception e) {
+            logger.warn("Could not read CLI shutdown grace; using 60 seconds: {}", e.getMessage());
+        }
+        CliShutdownLifecycle lifecycle = new CliShutdownLifecycle(graceSeconds);
+        boolean terminationConfirmed = true;
+        try {
+            lifecycle.register();
             startMigration(configPath);
         } catch (RunTerminationException e) {
+            terminationConfirmed = e.isTerminationConfirmed();
             logger.error("Migration terminated: {}", e.getMessage(), e.getCause());
             System.exit(e.getExitCode());
         } catch (Exception e) {
             logger.error("Migration failed", e);
             System.exit(1);
+        } finally {
+            lifecycle.finish(terminationConfirmed);
         }
     }
     
@@ -44,7 +57,6 @@ public class Main {
      * Wird auch von der WebGUI aufgerufen, um Ressourcenkonflikte zu vermeiden.
      */
     public static void startMigration(String configPath) throws Exception {
-        ShutdownCoordinator.reset();
         WorkerFailureState workerFailureState = new WorkerFailureState();
 
         // 1. Load Config and enforce the global destructive-operation policy.
@@ -99,9 +111,6 @@ public class Main {
         // 6. JMX & Monitoring
         MigrationMetrics.register(stats, queue, config.getSourceSSID(), config.getDestSSID());
         startResourceMonitor();
-
-        // Setup Shutdown Hook
-        setupShutdownHook(workerExecutor, pool, journal, config.getShutdownGraceSeconds());
 
         // 6. Start Producer
         Producer producer = new Producer(queue, config, journal, stats, workerFailureState);
@@ -224,38 +233,8 @@ public class Main {
     }
 
     /**
-     * Shutdown-Hook zur sauberen Freigabe von Ressourcen bei SIGTERM/INT (z.B. Strg+C)
-     */
-    private static void setupShutdownHook(final ExecutorService executor,
-                                          final CMConnectionPool pool,
-                                          final MigrationJournal journal,
-                                          final long graceSeconds) {
-        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            logger.info("Shutdown signal received. Requesting graceful stop...");
-            boolean terminated = executor == null || executor.isTerminated();
-            boolean shutdownAlreadyRequested = ShutdownCoordinator.isShuttingDown();
-            if (!terminated && !shutdownAlreadyRequested) {
-                try {
-                    terminated = WorkerTermination.awaitGrace(
-                            executor, graceSeconds, ShutdownCoordinator::requestShutdown);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                }
-            }
-
-            if (terminated) {
-                if (pool != null) pool.close();
-                if (journal != null) journal.close();
-                logger.info("Cleanup complete. Goodbye.");
-            } else {
-                logger.warn("Shutdown continues with workers still active; leaving CM pool/journal open.");
-            }
-        }, "shutdown-hook"));
-    }
-
-    /**
      * Adaptives Ressourcen-Management.
-     * Überwacht die Speicherauslastung und warnt bei kritischen Werten.
+
      */
     private static void startResourceMonitor() {
         Thread t = new Thread(() -> {

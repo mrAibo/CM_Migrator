@@ -20,7 +20,7 @@ if [[ -d lib ]]; then
 
     "$java_cmd" -cp "$work_dir:lib/*" com.ibm.ecm.migration.VerifierRuntimeSafetyTest
 else
-    printf 'SKIP: Java runtime test requires lib/ directory (excluded in CI sparse checkout)\n'
+    printf 'SKIP: VerifierRuntimeSafetyTest Java runtime portion requires private lib/; structure checks continue\n'
 fi
 
 python3 - <<'PY'
@@ -62,14 +62,16 @@ for source in (main, verifier):
     if "isTerminationConfirmed()" not in source and "termination.terminated()" not in source:
         raise SystemExit("FAIL: cleanup/reporting must be gated by confirmed termination")
 
-# Lifecycle: hook must not be in shared core
-if verifier[verifier.find("public static void run("):verifier.find("public static int runCli")].find("addShutdownHook") >= 0:
-    raise SystemExit("FAIL: shared verifier core must not register JVM shutdown hooks")
-if verifier[verifier.find("public static int runCli"):verifier.find("public static void run(")].find("addShutdownHook") < 0:
-    raise SystemExit("FAIL: CLI must register shutdown hook for SIGTERM support")
-if verifier[verifier.find("public static int runCli"):].find("removeShutdownHook") < 0:
-    raise SystemExit("FAIL: CLI must remove its shutdown hook after the run")
-if verifier[verifier.find("public static int runCli"):].find("ShutdownCoordinator.reset()") < 0:
+# Lifecycle: one bounded hook owned by CLI; shared core remains hook-free.
+run_cli = verifier[verifier.find("public static int runCli"):verifier.find("public static void run(")]
+common = verifier[verifier.find("public static void run("):]
+if "CliShutdownLifecycle" not in run_cli or "lifecycle.register()" not in run_cli:
+    raise SystemExit("FAIL: CLI must own one bounded shutdown lifecycle")
+if "lifecycle.finish(terminationConfirmed)" not in run_cli:
+    raise SystemExit("FAIL: CLI must signal completion and remove its hook")
+if "CliShutdownLifecycle" in common or "addShutdownHook" in common:
+    raise SystemExit("FAIL: shared verifier core must remain hook-free")
+if "ShutdownCoordinator.reset()" not in run_cli:
     raise SystemExit("FAIL: CLI must reset shutdown coordinator before run")
 
 # WebGUI: Interrupt must block run slot

@@ -43,6 +43,10 @@ jobs:
           bash tests/test-webgui-auth-fail-closed.sh
           bash tests/test-webgui-delete-lifecycle.sh
           bash tests/test-tracked-config-hygiene.sh
+          bash tests/test-run-lifecycle.sh
+
+      - name: Run structure checks and report private-lib runtime skips
+        run: |
           bash tests/test-verifier-runtime-safety.sh
           bash tests/test-webgui-run-snapshot-security.sh
 

@@ -22,7 +22,7 @@ if [[ -d lib ]]; then
         exit 1
     fi
 else
-    printf 'SKIP: Java runtime test requires lib/ directory (excluded in CI sparse checkout)\n'
+    printf 'SKIP: RunConfigSnapshotTest Java runtime portion requires private lib/; structure checks continue\n'
 fi
 
 python3 - <<'PY'

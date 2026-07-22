@@ -435,13 +435,10 @@ public class WebServer {
             String path = exchange.getRequestURI().getPath();
 
             if ("POST".equals(method) && path.equals("/api/operation/start")) {
-                if (migrationRunning.get()) {
-                    ProcessState active = currentProcess.get();
-                    String activeUrl = active == null ? "" : active.processUrl;
-                    sendJson(exchange, 409, "{\"error\":\"Operation already running\",\"processUrl\":\""
-                            + escapeJson(activeUrl) + "\"}");
-                    return;
-                }
+                ProcessState state = null;
+                Thread thread = null;
+                boolean slotReserved = false;
+                boolean threadStarted = false;
 
                 try {
                     String body = readRequestBody(exchange);
@@ -477,13 +474,22 @@ public class WebServer {
                         return;
                     }
 
+                    if (!WebGuiRunSlot.reserve(migrationRunning)) {
+                        ProcessState active = currentProcess.get();
+                        String activeUrl = active == null ? "" : active.processUrl;
+                        sendJson(exchange, 409, "{\"error\":\"Operation already running\",\"processUrl\":\""
+                                + escapeJson(activeUrl) + "\"}");
+                        return;
+                    }
+                    slotReserved = true;
+
                     String runId = makeRunId(mode, profile, configPath);
                     String host = requestHost(exchange);
                     int monitorPort = Integer.getInteger("cm.migrator.monitor.port", 8000);
                     String monitorHost = primaryIpOrHost();
                     String monitorBase = "http://" + monitorHost + ":" + monitorPort;
 
-                    ProcessState state = new ProcessState(
+                    ProcessState newState = new ProcessState(
                             runId,
                             mode,
                             profile == null || profile.isEmpty() ? stripPropertiesSuffix(configPath.getFileName().toString()) : profile,
@@ -491,25 +497,36 @@ public class WebServer {
                             monitorBase + "/status.html",
                             monitorBase + "/migration_report.html",
                             monitorBase + "/verification_report.html");
+                    state = newState;
 
-                    processRegistry.put(runId, state);
-                    currentProcess.set(state);
+                    processRegistry.put(runId, newState);
+                    currentProcess.set(newState);
 
-                    Thread thread = new Thread(() -> runOperation(state, configPath, mode), "webgui-run-" + runId);
-                    state.thread = thread;
-                    migrationThread.set(thread);
-                    thread.start();
+                    Thread newThread = new Thread(() -> runOperation(newState, configPath, mode), "webgui-run-" + runId);
+                    thread = newThread;
+                    newState.thread = newThread;
+                    migrationThread.set(newThread);
+                    newThread.start();
+                    threadStarted = true;
 
-                    String processAbsoluteUrl = "http://" + host + state.processUrl;
+                    String processAbsoluteUrl = "http://" + host + newState.processUrl;
                     sendJson(exchange, 202,
                             "{\"success\":true"
                                     + ",\"runId\":\"" + escapeJson(runId) + "\""
-                                    + ",\"processUrl\":\"" + escapeJson(state.processUrl) + "\""
+                                    + ",\"processUrl\":\"" + escapeJson(newState.processUrl) + "\""
                                     + ",\"processAbsoluteUrl\":\"" + escapeJson(processAbsoluteUrl) + "\""
-                                    + ",\"dashboardUrl\":\"" + escapeJson(state.dashboardUrl) + "\""
-                                    + ",\"migrationReportUrl\":\"" + escapeJson(state.migrationReportUrl) + "\""
-                                    + ",\"verificationReportUrl\":\"" + escapeJson(state.verificationReportUrl) + "\"}");
+                                    + ",\"dashboardUrl\":\"" + escapeJson(newState.dashboardUrl) + "\""
+                                    + ",\"migrationReportUrl\":\"" + escapeJson(newState.migrationReportUrl) + "\""
+                                    + ",\"verificationReportUrl\":\"" + escapeJson(newState.verificationReportUrl) + "\"}");
                 } catch (Exception e) {
+                    if (slotReserved && !threadStarted) {
+                        if (thread != null) migrationThread.compareAndSet(thread, null);
+                        if (state != null) {
+                            processRegistry.remove(state.runId, state);
+                            currentProcess.compareAndSet(state, null);
+                        }
+                        WebGuiRunSlot.rollbackBeforeThreadStart(migrationRunning);
+                    }
                     logger.error("Could not start operation", e);
                     sendError(exchange, 500, "Could not start operation: " + e.getMessage());
                 }
@@ -520,8 +537,6 @@ public class WebServer {
     }
 
     private void runOperation(ProcessState state, Path configPath, String requestedMode) {
-        ShutdownCoordinator.reset();
-        migrationRunning.set(true);
         state.status = "RUNNING";
         state.currentStep = "Starting";
         state.appendLog("Starting operation");
@@ -603,9 +618,8 @@ public class WebServer {
                 }
             }
             state.finishedAtMs = System.currentTimeMillis();
-            if (releaseRunSlot) {
-                migrationRunning.set(false);
-            } else {
+            WebGuiRunSlot.releaseIfConfirmed(migrationRunning, releaseRunSlot);
+            if (!releaseRunSlot) {
                 logger.warn("WebGUI run slot remains blocked because worker termination is unconfirmed.");
             }
         }

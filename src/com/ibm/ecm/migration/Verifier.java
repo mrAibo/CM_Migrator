@@ -95,22 +95,28 @@ public class Verifier {
     public static int runCli(String[] args) {
         ShutdownCoordinator.reset();
         String configPath = args.length > 0 ? args[0] : "conf/migration.properties";
-        Thread hook = new Thread(() -> {
-            // ponytail: minimal SIGTERM guard; WebGUI uses its own lifecycle.
-            ShutdownCoordinator.requestShutdown();
-        }, "verifier-cli-shutdown-hook");
+        long graceSeconds = 60L;
         try {
-            Runtime.getRuntime().addShutdownHook(hook);
+            graceSeconds = new MigrationConfig(configPath).getShutdownGraceSeconds();
+        } catch (Exception e) {
+            logger.warn("Could not read CLI shutdown grace; using 60 seconds: {}", e.getMessage());
+        }
+
+        CliShutdownLifecycle lifecycle = new CliShutdownLifecycle(graceSeconds);
+        boolean terminationConfirmed = true;
+        try {
+            lifecycle.register();
             run(configPath);
             return 0;
         } catch (RunTerminationException e) {
+            terminationConfirmed = e.isTerminationConfirmed();
             logger.error("Verification terminated: {}", e.getMessage(), e.getCause());
             return e.getExitCode();
         } catch (Exception e) {
             logger.error("Verification crashed", e);
             return 1;
         } finally {
-            try { Runtime.getRuntime().removeShutdownHook(hook); } catch (Exception ignore) { }
+            lifecycle.finish(terminationConfirmed);
         }
     }
 
