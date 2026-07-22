@@ -88,10 +88,9 @@ bin/start.sh --> Main
 | `bin/cascade-delete-guard.sh` | eigenständig testbarer Containment-Guard |
 | `bin/build-release.sh` | Release-Paketierung; Distribution ist nicht vollständig belegt |
 | `bin/deploy-source.sh` | erstellt ein Quellpaket unter dem Benutzer-Downloadverzeichnis; kein Laufzeit-Launcher |
-| `bin/apply-worker-failure-propagation.sh` und `.py` | historische/technische Patch-Anwendung; kein Betriebsweg des bereits integrierten Branches |
-| `bin/build-release.sh.bac` | historisches Backup; nicht ausführen |
 | `run.sh` | historischer Launcher für den separaten `com.example.migrator`-Prototyp; erwartet ein von `bin/compile.sh` nicht erzeugtes Root-JAR |
-| `bin/META-INF/MANIFEST.MF`, `bin/cm-migrator.jar` | getrackte/erzeugte Buildartefakte, keine Skripte |
+| `bin/META-INF/MANIFEST.MF` | Buildmetadaten; `bin/cm-migrator.jar` wird lokal erzeugt und nicht getrackt |
+
 
 `bin/common.sh` ist im aktuellen Branch nicht vorhanden und daher weder Launcher noch gemeinsame Runtime-Abhängigkeit.
 
@@ -126,34 +125,34 @@ bin/start.sh --> Main
 | `target/`, `bin/cm-migrator.jar`, `compile.log` | Build-Artefakte | kein Primärdatenbestand | reproduzierbar; nicht versionieren |
 | temporäre Contentdateien | Fallback für Content-Upload | können Originalcontent enthalten | nach Lauf auf Reste prüfen; nie versionieren |
 | `webapp/` | statische WebGUI-Dateien | keine Secrets einbetten | mit Release versionieren/sichern |
-| `tools/cm-migrator.keystore` | historisch getracktes Signing-Artefakt | als potenziell kompromittiert behandeln | nicht als produktiven Keystore übernehmen; extern ersetzen/rotieren |
-| `*.bak`, `*.bac`, historische Source-/Reportkopien | Altbestand | kann alte Credentials oder interne Daten enthalten | klassifizieren und kontrolliert bereinigen; nicht als aktive Config verwenden |
+| extern bereitgestellter Signing-Keystore | Release-Signierung | hochsensitiv | nicht versionieren; historisch veröffentlichte Keystore-Werte als kompromittiert behandeln und rotieren |
+| `*.bak`, `*.bac`, historische Source-/Reportkopien | Altbestand | kann alte Credentials oder interne Daten enthalten | am Branch-Tip bereinigt/ignoriert; historische Blobs nur per separat koordiniertem History-Purge entfernen |
 
 Code-Defaults für temporäre Dateien: kleine Dateien verwenden `java.io.tmpdir`; ab `cm.migrator.tmpdir.largeThresholdBytes` wird standardmäßig `/var/tmp/cm-migrator` verwendet. `bin/start.sh` setzt `java.io.tmpdir` auf `/dev/shm`. Diese Pfade müssen beschreibbar sein und ausreichend Platz besitzen.
 
 ### 4.1 Vollständiges Konfigurationsinventar
 
-- **Vorlagen:** `conf/migration.properties.example`, `conf/webgui.properties.example`, `conf/cmbicmenv.ini.example`.
-- **Logging:** `conf/log4j2.xml`, `conf/cmblogconfig.properties`, `conf/cmlog/connectors/dklog.log`.
-- **IBM-Runtime-Ressourcen:** `conf/cmbcmenv.properties`, `conf/cmbicmsrvs.ini` sowie eine historische `.bac`-Kopie.
-- **Bereits getrackte lokale/Legacy-Konfigurationen:** fünf weitere Propertydateien für Delete-, IBM-CM-, Backup- und umgebungsspezifische Migrationsprofile. Ihre internen Bezeichner und Werte werden hier bewusst nicht reproduziert. Sie sind als credentialfähig zu klassifizieren, zu rotieren und nicht als neutrale Vorlagen zu verwenden.
+- **Vorlagen:** `conf/migration.properties.example`, `conf/webgui.properties.example`, `conf/cmbcmenv.properties.example`, `conf/cmbicmsrvs.ini.example`, `conf/ibmcmconfig.properties.example`.
+- **Logging:** `conf/log4j2.xml`, `conf/cmblogconfig.properties`; Connector-Logs bleiben ungetrackt.
+- **IBM-Runtime-Ressourcen:** lokale, ignorierte `conf/cmbcmenv.properties`, `conf/cmbicmsrvs.ini` und optional `conf/ibmcmconfig.properties`; aus den neutralen Vorlagen beziehungsweise der freigegebenen Installation erzeugen.
+- **Bereinigter Altbestand:** umgebungsspezifische Migrationsprofile, Config-Backups, Laufreports, Debug-Mails, Statusseiten, Source-Backups, generiertes JAR und historischer Keystore sind am Branch-Tip nicht mehr getrackt. Lokale Operator-Dateien wurden bei der Bereinigung nicht gelöscht. Rotation und History-Purge bleiben separate Aufgaben.
 - **Build-/Legacy-Konfiguration:** `pom.xml`, `tools/proguard.conf` und `src/main/resources/log4j2.xml`. Letztere gehört zum separaten `com.example.migrator`-Tree; für dessen `migrator.properties` existiert keine neutrale Vorlage.
 
 ### 4.2 Vollständiges Testinventar
 
-- Shell-Runner: `tests/test-cascade-delete-guard.sh`, `tests/test-source-lookup-classifier.sh`, `tests/test-verifier-source-lookup-decision.sh`, `tests/test-worker-failure-state.sh`, `tests/test-worker-failure-patch.sh`, `tests/test-worker-failure-apply-script.sh`.
-- Java-Testprogramme: `SourceLookupClassifierTest`, `VerifierSourceLookupDecisionTest`, `WorkerFailureStateTest` unter `tests/java/com/ibm/ecm/migration/`.
+- Shell-Runner: `tests/test-cascade-delete-guard.sh`, `tests/test-source-lookup-classifier.sh`, `tests/test-verifier-source-lookup-decision.sh`, `tests/test-worker-failure-state.sh`, `tests/test-webgui-auth-fail-closed.sh`, `tests/test-webgui-delete-lifecycle.sh`, `tests/test-tracked-config-hygiene.sh`.
+- Java-Testprogramme: `SourceLookupClassifierTest`, `VerifierSourceLookupDecisionTest`, `WorkerFailureStateTest`, `AuthHandlerConfigurationTest`; die kleinen Log4j-Teststubs liegen unter `tests/stubs/`.
 
 ### 4.3 Berichts- und Dokumentationsinventar
 
 - Technische Top-Level-Dokumente: `README.md`, `BETRIEBSHANDBUCH.md`, `SECURITY.md`, `ARCHITEKTUR.md`, `ANLEITUNG_SLES15.md`, `SECURITY_P0_INTEGRATION_BERICHT.md`, `PR3_FAIL_CLOSED_REPORT.md`, `P0_WORKER_FAILURE_PROPAGATION_BERICHT.md`.
-- Getrackte generische Laufartefakte: `migration_report.html`, `deletion_report.html`, `verification_report.html`, `migration_plan.html`, `status.html` und Dateien unter `debug_mail/`.
-- `reports/` enthält 26 getrackte Dateien. Neutrale Vorlagen sind `reports/templates/migration_protocol_template.html`, `verification_protocol_template.html`, `summary_protocol_template.html`, die Template-Dokumentation und ein Bildasset. Die übrigen historischen, laufbezogenen Reports werden wegen interner Bezeichner nicht einzeln in diese Dokumentation kopiert.
-- `patches/p0-worker-failure-propagation.patch` ist ein technisches Integrationsartefakt, kein Laufreport und kein Operatorbefehl.
+- Laufreports, Statusseiten und `debug_mail/` werden lokal erzeugt und nicht getrackt.
+- Unter `reports/templates/` bleiben nur die wiederverwendbaren Protokollvorlagen, die Template-Dokumentation und das Bildasset versioniert.
+- Der bereits integrierte `WorkerFailureState`-Pfad wird direkt durch Produktionscode und `test-worker-failure-state.sh` abgesichert; einmalige Patch-/Apply-Artefakte wurden entfernt.
 
 ### 4.4 Verzeichnisinventar
 
-Getrackte Projektbereiche sind `src/`, `bin/`, `conf/`, `lib/`, `tests/`, `webapp/`, `reports/`, `patches/`, `tools/` und `debug_mail/`. `src/` enthält den aktuellen `com.ibm.ecm.migration`-Tree und zusätzlich den separaten Legacy-Maven-Tree unter `src/main/java`. Zur Laufzeit beziehungsweise beim Build entstehen zusätzlich `data/`, `logs/`, `target/`, temporäre Contentpfade und gegebenenfalls `java_env/`. Ein `docs/`-Verzeichnis und GitHub-Workflow-Verzeichnis sind im aktuellen Branch nicht vorhanden.
+Getrackte Projektbereiche sind `src/`, `bin/`, `conf/`, `lib/`, `tests/`, `webapp/`, `reports/`, `tools/` und `.github/`. `src/` enthält den aktuellen `com.ibm.ecm.migration`-Tree und zusätzlich den separaten Legacy-Maven-Tree unter `src/main/java`. Zur Laufzeit beziehungsweise beim Build entstehen zusätzlich `data/`, `logs/`, `debug_mail/`, `target/`, temporäre Contentpfade und gegebenenfalls `java_env/`; diese Bereiche bleiben ungetrackt. Ein `docs/`-Verzeichnis ist nicht vorhanden.
 
 ## 5. Installation und Erstinbetriebnahme
 
@@ -162,7 +161,7 @@ Getrackte Projektbereiche sind `src/`, `bin/`, `conf/`, `lib/`, `tests/`, `webap
 ```bash
 git clone https://github.com/mrAibo/CM_Migrator.git
 cd CM_Migrator
-git checkout hardening/security-baseline
+git checkout hardening/integration-readiness
 git status --short
 ```
 
@@ -184,11 +183,16 @@ Der Build benötigt JDK 11+. `pom.xml` deklariert Source/Target 11, aber `bin/co
 ```bash
 cp conf/migration.properties.example conf/migration.properties
 cp conf/webgui.properties.example conf/webgui.properties
-chmod 600 conf/migration.properties conf/webgui.properties
+cp conf/cmbcmenv.properties.example conf/cmbcmenv.properties
+cp conf/cmbicmsrvs.ini.example conf/cmbicmsrvs.ini
+# Optional, nur wenn vom freigegebenen IBM-SDK-Setup verlangt:
+# cp conf/ibmcmconfig.properties.example conf/ibmcmconfig.properties
+chmod 600 conf/migration.properties conf/webgui.properties \
+  conf/cmbcmenv.properties conf/cmbicmsrvs.ini
 chmod +x bin/*.sh
 ```
 
-`conf/cmbicmenv.ini.example` wird nicht direkt durch den Java-Code geladen. Der Code sucht `cmbicmsrvs.ini` und `cmbcmenv.properties` im Arbeitsverzeichnis oder Classpath; diese IBM-spezifischen Dateien sicher aus der freigegebenen Installation bereitstellen.
+Die IBM-Vorlagen sind neutral und enthalten keine produktiven Werte. Die daraus erzeugten Dateien lokal nach der freigegebenen Installation ausfüllen; `.gitignore` hält sie aus dem Tracking. Lokale Operator-Dateien wurden bei der Repository-Bereinigung nicht gelöscht.
 
 ### 5.4 Konfiguration ausfüllen
 
@@ -358,10 +362,10 @@ Der Versand verwendet lokal `mutt`, sonst `mailx`. Fehlen beide oder scheitert d
 
 | Property / Env | Pflicht | Standardwert | Bedeutung | Sicherheitshinweis |
 |---|---|---|---|---|
-| `webgui.auth.enabled` | empfohlen ja | `true` | Basic-Auth-Schalter | ohne Admin-User ist Auth faktisch deaktiviert |
-| `webgui.admin.user` | ja für Auth | Env-Fallback `WEBGUI_ADMIN_USER`, sonst kein verifizierter Wert | Admin-User | Propertywert gewinnt vor Env-Fallback |
-| `webgui.admin.password.hash` | empfohlen | kein verifizierter Standardwert | SHA-256-Hash | ungesalzen; Datei schützen |
-| `webgui.admin.password` | alternativ | Env-Fallback `WEBGUI_ADMIN_PASSWORD` | Klartextpasswort | nicht committen; Hash bevorzugen |
+| `webgui.auth.enabled` | empfohlen ja | `true` | Basic-Auth-Schalter | nur explizites `false` deaktiviert; ungültiger Wert bricht ab |
+| `webgui.admin.user` | ja für Auth | Property, dann Env-Fallback `WEBGUI_ADMIN_USER` | Admin-User | fehlender/leerer Wert bricht vor Port-Bind ab |
+| `webgui.admin.password.hash` | Legacy-Alternative | kein Standardwert | exakt 64 Hex-Zeichen SHA-256 | ungesalzen, keine moderne Passwort-KDF; Datei schützen |
+| `webgui.admin.password` / `WEBGUI_ADMIN_PASSWORD` | alternativ | kein Standardwert | Klartextpasswort | Prozess-Env bevorzugen; nicht committen oder als Argument übergeben |
 | `WEBGUI_ALLOW_PASSWORDLESS_CM_LOGIN` | nein | `false` | erlaubt WebGUI-Run ohne CM-Passwortproperty | ausgeschaltet lassen |
 | `-Dcm.migrator.webgui.bindAll` | nein | `false` | Bindung an alle Interfaces | nur mit TLS/Proxy/Netzschutz |
 | `-Dcm.migrator.webgui.bindAddress` | nein | kein verifizierter Standardwert | konkrete Bind-Adresse | localhost bevorzugen |
@@ -369,7 +373,7 @@ Der Versand verwendet lokal `mutt`, sonst `mailx`. Fehlen beide oder scheitert d
 | `WEBGUI_RUN_ID` | nein; intern erzeugt | kein verifizierter Standardwert | Run-ID im WebGUI-Snapshot | nicht manuell als Freigabemerkmal setzen |
 | `WEBGUI_SOURCE_CONFIG` | nein; intern erzeugt | kein verifizierter Standardwert | Herkunftsdatei im WebGUI-Snapshot | kann interne Pfade enthalten |
 
-Fehlt bei aktivierter Auth ein Passwort, erzeugt und loggt `AuthHandler` ein temporäres Passwort. Das Log ist dann ein Secret-Artefakt. Fehlversuche werden pro ermittelter Client-IP gezählt; nach fünf Fehlern gilt eine fünfminütige Sperre. Ein ungeprüftes `X-Forwarded-For` kann die IP-Ermittlung beeinflussen.
+Bei aktivierter Auth validiert `WebServer` die Konfiguration vor dem Port-Bind. Fehlender Benutzer, fehlendes Passwort/Hash, ein ungültiger Auth-Schalter oder ein nicht exakt 64-stelliger Hex-Hash brechen den Start ohne Secretwert im Fehlertext ab; es wird kein temporäres Passwort erzeugt oder geloggt. Fehlversuche werden pro ermittelter Client-IP gezählt; nach fünf Fehlern gilt eine fünfminütige Sperre. Ein ungeprüftes `X-Forwarded-For` kann die IP-Ermittlung beeinflussen.
 
 ### 6.14 Monitoring und Logging
 
@@ -641,7 +645,7 @@ Cascade Delete entfernt ein Destination-Objekt, wenn das zugehörige Source-Obje
 - `webgui.sh` prüft nur `conf/migration.properties` beim Serverstart; später ausgewählte Profile sind damit nicht vollständig abgedeckt.
 - `start.sh`, direkte Java-Aufrufe und der In-Prozess-WebGUI-Pfad besitzen keine allgemeine Launcher-Garantie.
 
-Die Guard-Kommentare sprechen noch von einer unsicheren alten Boolean-Implementierung; die aktuelle Java-Logik ist bereits Tri-State. Der Guard bleibt dennoch als konservative Containment-Policy aktiv.
+Die Java-Logik ist bereits fail-closed als Tri-State implementiert. Der Launcher-Guard bleibt bewusst als temporäres betriebliches Containment aktiv und blockiert weiterhin jede aktivierte Cascade-Delete-Konfiguration bis zur IBM-Live-Abnahme und ausdrücklichen Betriebsfreigabe.
 
 ### Java-Level-Entscheidung
 
@@ -755,14 +759,15 @@ Danach lokal `http://127.0.0.1:8080/` öffnen. Nur `/api/health` ist absichtlich
 
 Sicherheitsregeln:
 
-- `webgui.auth.enabled=true`, Admin-User und starkes Passwort/Hash setzen;
+- `webgui.auth.enabled=true`, Admin-User und bevorzugt `WEBGUI_ADMIN_PASSWORD` oder einen gültigen Legacy-Hash setzen;
+- fehlende/ungültige Auth-Werte brechen vor dem Port-Bind ab; es wird kein temporäres Passwort erzeugt oder geloggt;
 - niemals `--bind-all` oder öffentliche Bind-Adresse ohne TLS, Reverse Proxy, 2FA/Netzschutz und Freigabe;
-- Basic Auth selbst bietet kein TLS;
-- fehlender Admin-User deaktiviert Auth faktisch;
-- temporär geloggtes Passwort sofort als Secret behandeln;
+- Basic Auth selbst bietet kein TLS; der kompatible SHA-256-Hash ist ungesalzen;
 - Config-API kann Properties unter `conf/` verändern;
 - Run-Snapshots unter `data/webgui-runs/` enthalten potenziell vollständige Credentials und werden nicht automatisch entfernt;
 - WebGUI-`safe` ist nur Migration plus Verifikation, nicht der fünfstufige CLI-Safe-Workflow;
+- WebGUI-`delete` ruft den exception-basierten `Main.startMigration`-Kern auf; Workerfehler werden vom Run-Handler als `FAILED` erfasst, ohne die WebGUI-JVM über `System.exit` zu beenden;
+- der CLI-Wrapper `Main.main` behält bei propagierten Fehlern Exit `1`;
 - `Verifier.main` kann äußere Exceptions nur loggen und zurückkehren; ein WebGUI-Verify/`safe` kann deshalb formal `COMPLETED` sein, obwohl Logs oder Journal einen technischen Fehler zeigen;
 - beim Run-Stop wird kooperativ Shutdown+Interrupt angefordert; blockierte SDK-Aufrufe können fortbestehen;
 - Prozess-/Run-Zustände sind nicht dauerhaft außerhalb des laufenden WebServer-Prozesses gespeichert.
@@ -895,7 +900,7 @@ chmod -R u=rwX,go= data/migration_journal
 - Logrotation und freien Journal-/Temp-Speicher regelmäßig prüfen;
 - Journale erst nach fachlicher/technischer Abnahme und Backup bereinigen;
 - Credentials, WebGUI-Passwort und Keystores rotieren;
-- historische getrackte Backup-/Credential-/Reportartefakte separat klassifizieren;
+- bereinigten Branch-Tip frei von Laufzeit-/Backup-/Credential-Artefakten halten; Rotation und separat koordinierten History-Purge nachverfolgen;
 - `bin/build-release.sh` nicht als nachweislich vollständige Betriebsdistribution annehmen: es kopiert nur eine Teilmenge aktueller Operator-Skripte und referenziert einen nicht vorhandenen `remigrate.sh`;
 - Branch, Commit und Release-Artefakt in jeder Betriebsfreigabe festhalten;
 - keine Performancezusage ohne Lasttest in der Zielumgebung.
@@ -914,12 +919,14 @@ Reale Wartungs-/Paketierungsbefehle:
 ### 24.1 Lokale Testmatrix
 
 ```bash
+bash -n bin/*.sh tests/*.sh
 bash tests/test-cascade-delete-guard.sh
 bash tests/test-source-lookup-classifier.sh
 bash tests/test-verifier-source-lookup-decision.sh
 bash tests/test-worker-failure-state.sh
-bash tests/test-worker-failure-patch.sh
-bash tests/test-worker-failure-apply-script.sh
+bash tests/test-webgui-auth-fail-closed.sh
+bash tests/test-webgui-delete-lifecycle.sh
+bash tests/test-tracked-config-hygiene.sh
 bash bin/compile.sh
 git diff --check
 ```
@@ -928,13 +935,16 @@ Einordnung:
 
 | Test | Evidenzklasse |
 |---|---|
-| `test-cascade-delete-guard.sh` | lokaler Shell-Funktionstest des Guards |
+| `test-cascade-delete-guard.sh` | lokaler Shell-Funktionstest des unverändert konservativen Guards |
 | `test-source-lookup-classifier.sh` | lokaler Unit-Test des dependency-armen Classifiers |
-| `test-verifier-source-lookup-decision.sh` | Unit-Test der finalen Delete-Entscheidung plus Strukturprüfung des Verifiers |
-| `test-worker-failure-state.sh` | lokaler Unit-Test des ersten Fehlerzustands/Cause |
-| `test-worker-failure-patch.sh` | Strukturtest des Patch-Artefakts |
-| `test-worker-failure-apply-script.sh` | Struktur-/Dry-Run-Test des Apply-Skripts |
-| `bin/compile.sh` | lokaler Java-11-Compile-/JAR-Build mit vorhandenen Libraries |
+| `test-verifier-source-lookup-decision.sh` | lokal IBM-library-abhängiger Unit-/Strukturtest der finalen Delete-Entscheidung |
+| `test-worker-failure-state.sh` | lokaler dependency-freier Unit-Test des ersten Fehlerzustands/Cause |
+| `test-webgui-auth-fail-closed.sh` | dependency-freier Java-/Strukturtest der Auth-Konfiguration vor Port-Bind |
+| `test-webgui-delete-lifecycle.sh` | dependency-freier Struktur-/Lifecycle-Test des eingebetteten Delete-Pfads |
+| `test-tracked-config-hygiene.sh` | dependency-freier Tracking-/Vorlagen-Regressionstest |
+| `bin/compile.sh` | lokaler Java-Compile-/JAR-Build mit vorhandenen freigegebenen Libraries |
+
+`.github/workflows/test.yml` verwendet minimale Read-only-Rechte, Ubuntu und Temurin 17. Ein Blob-gefilterter Sparse-Checkout materialisiert `lib/` nicht. CI führt Shell-Syntax, `git diff --check` und alle IBM-unabhängigen Tests aus. `test-verifier-source-lookup-decision.sh` und der Gesamtbuild bleiben wegen IBM-SDK-/JNI-/Lizenzabhängigkeit ein lokales beziehungsweise privates Gate; es wird kein grüner Hosted-CI-Build vorgetäuscht.
 
 Keine dieser Prüfungen ist ein IBM-CM-Live-E2E-Test.
 
@@ -981,29 +991,25 @@ Akzeptanz nur, wenn `ERROR` in keinem technischen Fehlerfall zu Delete führt, `
 
 ## 26. Bekannte Einschränkungen und offene Risiken
 
-- kein IBM-CM-Live-E2E-Test der neuen Sicherheitsänderungen;
-- keine GitHub-Workflow-/CI-Checks im aktuellen Branch;
+- IBM-CM-Live-E2E der Sicherheits- und Lifecycle-Änderungen bleibt offen;
+- Credential-Rotation und ein separat koordinierter Git-History-Purge bleiben trotz bereinigtem Branch-Tip offen;
+- Hosted CI umfasst nur IBM-unabhängige Checks; Gesamtbuild, Verifier-Test und JNI-Kompatibilität bleiben lokales/privates Gate;
+- produktive Performance- und JNI-Abnahme in der Zielumgebung fehlt;
+- die 24h-Timeout-/unbegrenzte-Warte-Policy für blockierte SDK-Aufrufe benötigt eine ausdrückliche Betriebsentscheidung;
 - lokale, installationsabhängige IBM- und Third-Party-Libraries unter `lib/`;
 - Classifier hängt von beobachteten IBM-Exceptiontexten ab; unbekannte Meldungen werden sicher `ERROR`;
-- unterstützter Verify-Launcher blockiert aktiviertes Cascade Delete trotz implementiertem Tri-State;
-- `cm-run safe` prüft Cascade Delete erst in der Verify-Phase nach Migration;
-- WebGUI-Profilwahl ist nicht vollständig vom Start-Guard erfasst;
-- WebGUI-`safe` ist schwächer als CLI-`safe`;
-- WebGUI-Verify/`safe` kann wegen der Exceptionbehandlung in `Verifier.main` einen irreführenden `COMPLETED`-Status liefern;
+- unterstützter Verify-Launcher blockiert aktiviertes Cascade Delete trotz implementiertem Tri-State bis zur Live-Freigabe;
+- `cm-run safe` prüft Cascade Delete erst in der Verify-Phase nach Migration; WebGUI-Profilwahl ist vom Start-Guard nicht vollständig erfasst;
+- WebGUI-`safe` ist schwächer als CLI-`safe`; Verifier-Exceptions können weiterhin einen irreführenden `COMPLETED`-Status ergeben;
 - statische Verifier-Zähler sind bei mehreren Runs derselben JVM nicht sauber isoliert;
-- Main-24-h-Wait ist kein harter Timeout; SDK-Calls können länger blockieren;
 - Consumer-Einzelfehler und Verify-Mismatches besitzen keinen stabilen Nonzero-Prozesscode;
-- asynchrones Journal kann bei Queue-Überlauf Updates verwerfen; Drain ist auf 30 s begrenzt;
-- VerificationLogger kann nach wiederholten Flushproblemen bei voller Queue Einträge verlieren;
+- asynchrones Journal/VerificationLogger kann bei Queue-/Drain-Problemen Einträge verlieren;
 - `monitor.sh` exponiert ohne zusätzliche Schutzmaßnahmen das Projektverzeichnis;
-- WebGUI Basic Auth hat kein TLS und verwendet einen ungesalzenen SHA-256-Hash;
+- WebGUI Basic Auth hat kein TLS; SHA-256 ist ungesalzen und nur eine Legacy-Kompatibilitätsgrenze;
 - WebGUI-Run-Snapshots können Credentials dauerhaft hinterlassen;
-- historische Backup-, Report-, Debug-Mail-, Source-Kopie- und Keystore-Dateien sind teilweise getrackt;
-- der separate Maven-/Legacy-Tree besitzt eigene COPY/MOVE/DELETE- und Journal-Semantik, ist nicht Teil der aktuellen Safety-Tests und darf nicht mit dem Primärbetrieb gleichgesetzt werden;
-- `conf/migration.properties.example` enthält numerische Werte mit Inline-Kommentaren, die auf Code-Defaults zurückfallen können;
+- der separate Maven-/Legacy-Tree besitzt eigene COPY/MOVE/DELETE- und Journal-Semantik und ist nicht Teil der aktuellen Safety-Tests;
 - `DATA_DIR`, `LOG_ERRORS_IMMEDIATE`, `AUDIT_PROTOCOL_OUTPUT_DIR`, `PROTOCOL_OUTPUT_DIR` und mehrere historische Optionen haben keine nachgewiesene Laufzeitwirkung;
-- bestehende Java-Deprecation-/Unchecked-Warnungen sind möglich;
-- keine belastbare Aussage über produktive Performance ohne Umgebungstest.
+- bestehende Java-Deprecation-/Unchecked-Warnungen sind möglich.
 
 ## 27. Änderungs- und Freigabeprozess
 
@@ -1011,7 +1017,7 @@ Vor Merge beziehungsweise produktiver Nutzung:
 
 1. Diff und Aufrufer-/Laufzeitfluss reviewen;
 2. Secrets/produktive Werte im Diff und in historischen Artefakten prüfen;
-3. sechs lokale Tests, Build und `git diff --check` ausführen;
+3. sieben lokale Tests, Build und `git diff --check` ausführen;
 4. Security-Review für Delete, Lookup-Klassifikation, Shutdown und Journal durchführen;
 5. kontrollierten IBM-Live-E2E-Test nach Abschnitt 24 dokumentieren;
 6. Betriebsfreigabe mit Branch/Commit, Configklasse, Ergebnissen und Restrisiken festhalten;

@@ -45,9 +45,9 @@ if [ ! -f "$JAR_FILE" ]; then
     exit 1
 fi
 
-# P0 containment: protect the standard WebGUI configuration path from the
-# verifier's unsafe boolean source-existence check. The definitive Java fix
-# will replace this temporary launcher barrier.
+# Operational containment: Java tri-state lookup is implemented, but the
+# standard WebGUI configuration remains blocked from enabling cascade delete
+# until IBM live acceptance and explicit operational approval.
 DEFAULT_MIGRATION_CONFIG="conf/migration.properties"
 if [ -f "$DEFAULT_MIGRATION_CONFIG" ]; then
     # shellcheck source=bin/cascade-delete-guard.sh

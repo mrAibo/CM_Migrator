@@ -2,7 +2,7 @@
 
 CM Migrator ist ein Java-Werkzeug für die Migration und Verifikation von Dokumenten zwischen IBM-Content-Manager-8.7-Systemen. Der aktuelle Stand unterstützt parallele Verarbeitung, H2-basierte Journale zur Wiederaufnahme, HTML-/CSV-Berichte, eine WebGUI und laufende Statusausgaben.
 
-Der Integrationsbranch `hardening/security-baseline` enthält insbesondere die Härtungen aus PR #2, #3 und #5: Launcher-Containment für Cascade Delete, einen fail-closed Source-Lookup mit `EXISTS`/`NOT_FOUND`/`ERROR` sowie die Weiterleitung asynchroner Producer-/Discovery-Fehler. Diese Änderungen sind lokal beziehungsweise strukturell getestet, aber noch nicht in einem kontrollierten Live-End-to-End-Test gegen IBM Content Manager bestätigt.
+Der Branch `hardening/integration-readiness` baut auf `hardening/security-baseline` auf und ergänzt die lokal lösbaren Readiness-Härtungen: bereinigtes Config-/Runtime-Tracking, fail-closed WebGUI-Auth, einen einbettbaren WebGUI-Delete-Pfad, entfernte einmalige Worker-Patch-Hilfen sowie dependency-freie GitHub-CI. IBM-CM-Live-E2E, Credential-Rotation, Git-History-Purge, produktive Performance-/JNI-Abnahme und die Entscheidung zur 24h-/unbegrenzten-Warte-Policy bleiben offen.
 
 Für Installation, Betrieb, Konfigurationsreferenz, Fehlerbehebung und Wiederanlauf siehe das [Betriebshandbuch](BETRIEBSHANDBUCH.md).
 
@@ -95,14 +95,14 @@ Diese Lifecycle-Eigenschaften sind lokal und strukturell getestet; ein Live-E2E-
 |---|---|
 | `src/com/ibm/ecm/migration/` | aktueller, von `bin/compile.sh` gebauter Java-Quellbaum |
 | `src/main/java/com/example/migrator/` | separater Maven-/Legacy-Prototyp; nicht Teil des dokumentierten Builds |
-| `bin/` | Build-, Launcher-, Guard-, Monitor- und Release-Skripte; erzeugtes `cm-migrator.jar` |
-| `conf/` | Vorlagen, Log4j2-Konfiguration und lokale IBM-/Anwendungskonfigurationen |
+| `bin/` | Build-, Launcher-, Guard-, Monitor- und Release-Skripte; erzeugtes `cm-migrator.jar` bleibt ungetrackt |
+| `conf/` | neutrale Vorlagen sowie versionierte Log4j2-/Logging-Konfiguration; reale IBM-/Anwendungskonfigurationen bleiben lokal |
 | `lib/` | lokale Java-Abhängigkeiten einschließlich IBM-CM-, H2- und Logging-JARs |
-| `tests/` | Shell-Tests und kleine Java-Testprogramme für die Security-Härtungen |
+| `tests/` | dependency-freie Shell-/Java-Tests sowie der lokal IBM-abhängige Verifier-Test |
 | `webapp/` | statische Dateien der WebGUI |
-| `reports/` | wiederverwendbare HTML-Templates und historisch versionierte Reportartefakte |
-| `patches/` | unterstützende Patch-Artefakte der Worker-Fehlerweiterleitung |
-| `tools/` | optionale Release-/Obfuscation-/Signing-Werkzeuge; enthält sicherheitsrelevante Altartefakte |
+| `reports/` | wiederverwendbare HTML-Templates; Laufreports bleiben ungetrackt |
+| `tools/` | optionale Release-/Obfuscation-/Signing-Werkzeuge; Signing-Keystores werden extern bereitgestellt |
+| `.github/workflows/test.yml` | read-only CI für Shell-Syntax und IBM-unabhängige Security-Tests |
 
 Ein `docs/`-Verzeichnis ist im aktuellen Branch nicht vorhanden. Projektdokumentation liegt auf Top-Level.
 
@@ -111,17 +111,22 @@ Ein `docs/`-Verzeichnis ist im aktuellen Branch nicht vorhanden. Projektdokument
 ```bash
 git clone https://github.com/mrAibo/CM_Migrator.git
 cd CM_Migrator
-git checkout hardening/security-baseline
+git checkout hardening/integration-readiness
 
 cp conf/migration.properties.example conf/migration.properties
 cp conf/webgui.properties.example conf/webgui.properties
-chmod 600 conf/migration.properties conf/webgui.properties
+cp conf/cmbcmenv.properties.example conf/cmbcmenv.properties
+cp conf/cmbicmsrvs.ini.example conf/cmbicmsrvs.ini
+# Optional, nur falls das freigegebene IBM-SDK-Setup sie benötigt:
+# cp conf/ibmcmconfig.properties.example conf/ibmcmconfig.properties
+chmod 600 conf/migration.properties conf/webgui.properties \
+  conf/cmbcmenv.properties conf/cmbicmsrvs.ini
 chmod +x bin/*.sh
 
 bash bin/compile.sh
 ```
 
-`conf/cmbicmenv.ini.example` ist eine neutrale Vorlage, wird vom aktuellen Java-Code aber nicht direkt geladen. Die reale IBM-SDK-Konfiguration muss zur jeweiligen Installation passen. Der Code sucht insbesondere nach `cmbicmsrvs.ini` und `cmbcmenv.properties` im Arbeitsverzeichnis beziehungsweise Classpath; produktive Werte gehören nicht in Git.
+Die drei IBM-Vorlagen enthalten keine Host-, Benutzer- oder Credentialwerte. Sie müssen lokal nach der freigegebenen IBM-CM-Installation ausgefüllt werden; die realen Dateien bleiben durch `.gitignore` ungetrackt. Ein Release-Signing-Keystore wird ebenfalls extern bereitgestellt.
 
 Vor dem Build und erst recht vor einem Lauf:
 
@@ -170,10 +175,13 @@ Der Modus `delete` ist real vorhanden, aber destruktiv und deshalb kein Schnells
 
 Wichtige Dateien:
 
-- `conf/migration.properties.example`: Vorlage für Migration, Verifikation, Journal, Reports und optionale WebGUI-Auth;
+- `conf/migration.properties.example`: neutrale Vorlage für Migration, Verifikation, Journal und Reports;
 - `conf/webgui.properties.example`: separate WebGUI-Auth-Vorlage; `conf/webgui.properties` hat beim Laden Vorrang vor `conf/migration.properties`;
-- `conf/cmbicmenv.ini.example`: neutrale IBM-Umgebungsvorlage ohne nachgewiesenen direkten Java-Ladepfad;
-- `conf/log4j2.xml`: Logging, Rolling Files und Log-Level.
+- `conf/cmbcmenv.properties.example` und `conf/cmbicmsrvs.ini.example`: neutrale Schemas für die vom IBM-SDK geladenen lokalen Ressourcen;
+- `conf/ibmcmconfig.properties.example`: optionale neutrale IBM-Installationsvorlage;
+- `conf/log4j2.xml` und `conf/cmblogconfig.properties`: versionierte Logging-Konfiguration.
+
+Mit `webgui.auth.enabled=true` startet die WebGUI nur mit nichtleerem Admin-Benutzer und entweder `WEBGUI_ADMIN_PASSWORD`, explizitem Passwort oder gültigem 64-Hex-SHA-256-Hash. Es wird kein Passwort erzeugt oder geloggt; ungültige/fehlende Werte brechen vor dem Port-Bind ab. SHA-256 bleibt eine ungesalzene Legacy-Grenze, keine moderne Passwort-KDF.
 
 Properties-Dateien können Klartext-Credentials oder reversibel kodierte Legacy-Werte enthalten. `*_PASSWORD_CRYPT` ist **keine sichere Verschlüsselung**. Konfigurationsdateien auf `0600` begrenzen, extern sichern und nie versionieren.
 
@@ -190,9 +198,12 @@ bash tests/test-cascade-delete-guard.sh
 bash tests/test-source-lookup-classifier.sh
 bash tests/test-verifier-source-lookup-decision.sh
 bash tests/test-worker-failure-state.sh
-bash tests/test-worker-failure-patch.sh
-bash tests/test-worker-failure-apply-script.sh
+bash tests/test-webgui-auth-fail-closed.sh
+bash tests/test-webgui-delete-lifecycle.sh
+bash tests/test-tracked-config-hygiene.sh
 ```
+
+`.github/workflows/test.yml` führt Shell-Syntax, `git diff --check` und alle IBM-unabhängigen Tests mit Java 17 aus. Der Hosted Runner materialisiert `lib/` nicht. `test-verifier-source-lookup-decision.sh` und `bin/compile.sh` benötigen die lokalen IBM-/Third-Party-Libraries und bleiben daher ein lokales beziehungsweise privates Gate; CI täuscht dafür keinen grünen Build vor.
 
 Ein grüner lokaler Testlauf bestätigt die jeweils getesteten Shell-, Unit- oder Strukturpfade. Er ersetzt keinen IBM-CM-Live-E2E-Test.
 
@@ -215,19 +226,20 @@ Der separate Tree `src/main/java/com/example/migrator/` gehört zum Maven-/Legac
 
 ## Bekannte Einschränkungen
 
-- Kein bestätigter IBM-CM-Live-E2E-Test für Cascade-Delete-Tri-State oder Worker-Fehlerweiterleitung.
-- Keine GitHub-Workflow-/CI-Konfiguration im aktuellen Branch; lokale Tests und Build sind das technische Gate.
+- Kein bestätigter IBM-CM-Live-E2E-Test für Cascade-Delete-Tri-State, Worker-Fehlerweiterleitung oder WebGUI-Delete.
+- Hosted CI deckt nur IBM-unabhängige Tests ab; Verifier-Test und Gesamtbuild bleiben lokales/privates Gate mit freigegebenen Libraries.
+- Bereits veröffentlichte Credentials müssen unabhängig rotiert und in einer separat koordinierten Aktion aus der Git-Historie entfernt werden; dieser Branch führt keinen History-Rewrite aus.
 - Laufzeit und Build hängen von lokalen `lib/*.jar` sowie gegebenenfalls einem installationsspezifischen IBM-Systempfad ab.
 - Der optionale Pfad `/opt/IBM/cm87_api/lib` ist auf einem Build-Host möglicherweise nicht vorhanden.
 - `SourceLookupClassifier` hängt von beobachteten Exceptionmeldungen ab; unbekannte Meldungen werden sicher als `ERROR` behandelt.
 - Die reversible Legacy-Credential-Kodierung ist keine sichere Verschlüsselung.
-- WebGUI Basic Auth läuft ohne eingebautes TLS; der gespeicherte Passwort-Hash ist ein ungesalzener SHA-256-Hash.
+- WebGUI Basic Auth läuft ohne eingebautes TLS; der kompatible Passwort-Hash ist ein ungesalzener SHA-256-Hash.
 - `monitor.sh` stellt das Projektverzeichnis ohne Authentifizierung bereit.
 - H2-Journaling ist asynchron; ein Queue-Überlauf oder ein Writer, der beim Shutdown nicht rechtzeitig endet, ist ein offenes Betriebsrisiko.
-- Historische Backup-, Report-, Debug-Mail-, Source-Kopie- und Keystore-Dateien sind teilweise bereits versioniert. Sie dürfen nicht als sichere Vorlagen oder aktuelle Betriebsdaten behandelt werden.
 - Der separate `com.example.migrator`-Prototyp besitzt eigene Config-, Journal- und Delete-Semantik und ist nicht durch `bin/compile.sh` oder die aktuelle Testmatrix abgedeckt.
 - Der aktuelle Build kann Deprecation-/Unchecked-Warnungen ausgeben; diese sind nicht automatisch Buildfehler.
-- Über produktive Performance lässt sich ohne Messung in der Zielumgebung keine belastbare Aussage treffen.
+- Produktive Performance und JNI-Kompatibilität benötigen eine Abnahme in der Zielumgebung.
+- Nach dem nominellen 24h-Worker-Timeout kann auf laufende SDK-Aufrufe unbegrenzt weitergewartet werden; diese Policy benötigt eine ausdrückliche Betriebsentscheidung.
 
 ## Weitere Dokumentation
 

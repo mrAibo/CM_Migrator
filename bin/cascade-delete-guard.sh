@@ -1,9 +1,9 @@
 #!/bin/bash
 # Shared preflight guard for verifier entry points.
 #
-# The current Verifier implementation treats every source lookup exception as
-# "not found". Until source lookup has an explicit EXISTS / NOT_FOUND / ERROR
-# result, cascade deletion must remain disabled.
+# The Java verifier now distinguishes EXISTS / NOT_FOUND / ERROR. This launcher
+# guard remains deliberate operational containment: every enabled cascade delete
+# is blocked until the IBM live acceptance and explicit operational approval.
 
 read_java_property_normalized() {
     local config_file="$1"
@@ -58,10 +58,9 @@ ERROR: Unsafe configuration refused.
 CASCADE_DELETE_ON_MISSING is enabled in:
   $config_file
 
-The current verifier cannot safely distinguish a confirmed missing source item
-from a source lookup failure such as a network, authentication, timeout, or SDK
-error. Starting verification with cascade deletion enabled could therefore
-delete valid destination documents.
+The Java verifier implements fail-closed EXISTS / NOT_FOUND / ERROR handling,
+but cascade deletion has not yet passed the required IBM live acceptance and
+explicit operational approval. The launcher therefore blocks every activation.
 
 Set CASCADE_DELETE_ON_MISSING=false and run verification again.
 EOF
