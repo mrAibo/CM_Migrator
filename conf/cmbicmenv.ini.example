@@ -1,0 +1,9 @@
+# IBM Content Manager credential template
+# Copy to conf/cmbicmenv.ini and keep the resulting file untracked.
+#
+# The value format is IBM CM specific. Any encoded value remains a credential
+# and must be protected like a plaintext password.
+#
+# Example placeholders only:
+# SOURCE_SSID=(ENCODED_USER_AND_PASSWORD)
+# DEST_SSID=(ENCODED_USER_AND_PASSWORD)
