@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Configuration status="WARN">
+    <Appenders>
+        <Console name="Console" target="SYSTEM_OUT">
+            <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss} [%t] %-5level %logger{36} [type=%X{itemType} id=%X{itemId} dest=%X{destType}] - %msg%n"/>
+        </Console>
+
+        <RollingFile name="File" fileName="migration.log" filePattern="migration-%d{yyyy-MM-dd}-%i.log.gz">
+            <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss} [%t] %-5level %logger{36} [type=%X{itemType} id=%X{itemId} dest=%X{destType}] - %msg%n"/>
+            <Policies>
+                <SizeBasedTriggeringPolicy size="10 MB"/>
+            </Policies>
+            <DefaultRolloverStrategy max="5"/>
+        </RollingFile>
+
+        <RollingFile name="ErrorFile" fileName="verification_errors.log" filePattern="verification_errors-%d{yyyy-MM-dd}-%i.log.gz">
+            <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss} [%t] %-5level %logger{36} [type=%X{itemType} id=%X{itemId} dest=%X{destType}] - %msg%n"/>
+            <Policies>
+                <SizeBasedTriggeringPolicy size="10 MB"/>
+            </Policies>
+            <DefaultRolloverStrategy max="5"/>
+            <Filters>
+                <ThresholdFilter level="error" onMatch="ACCEPT" onMismatch="DENY"/>
+            </Filters>
+        </RollingFile>
+    </Appenders>
+
+    <Loggers>
+        <Root level="warn">
+            <AppenderRef ref="Console"/>
+            <AppenderRef ref="File"/>
+        </Root>
+
+        <Logger name="com.ibm.ecm.migration" level="info" additivity="false">
+            <AppenderRef ref="File"/>
+            <AppenderRef ref="Console" level="warn"/>
+        </Logger>
+
+        <Logger name="com.ibm.ecm.migration.ItemMigrator" level="info" additivity="false">
+            <AppenderRef ref="File"/>
+            <AppenderRef ref="Console" level="warn"/>
+        </Logger>
+
+        <Logger name="com.ibm.ecm.migration.ProgressMonitor" level="info" additivity="false">
+            <AppenderRef ref="Console"/>
+            <AppenderRef ref="File"/>
+        </Logger>
+
+        <Logger name="com.ibm.ecm.migration.Verifier" level="info" additivity="false">
+            <AppenderRef ref="File"/>
+            <AppenderRef ref="ErrorFile"/>
+        </Logger>
+
+        <!-- Optional: IBM SDK eher ruhig halten -->
+        <Logger name="com.ibm.mm" level="warn" additivity="false">
+            <AppenderRef ref="File"/>
+            <AppenderRef ref="Console" level="warn"/>
+        </Logger>
+
+        <Logger name="ConsoleProgress" level="info" additivity="false">
+            <AppenderRef ref="Console"/>
+        </Logger>
+    </Loggers>
+</Configuration>
