@@ -258,6 +258,77 @@ Für `PROFILE` selbst existiert kein Code-Default. Der Vorlagenwert ist keine au
 | `DEST_PASSWORD` | nein, wenn andere Passwortquelle gesetzt | kein verifizierter Standardwert | Destination-Klartextpasswort | nicht versionieren |
 | `DEST_PASSWORD_CRYPT` | nein | kein verifizierter Standardwert | reversibel kodiertes Legacy-Passwort | **keine Verschlüsselung** |
 
+### 6.3.1 Credential-Auflösungskette
+
+Die tatsächlichen Verbindungsdaten werden von `CMConnectionPool` (`CMConnectionPool.java:145-149`) an `CMConnection` übergeben. `CMConnection.connect()` (`CMConnection.java:119`) ruft dann exakt auf:
+
+```java
+ds = new DKDatastoreICM();
+ds.connect(ssid, username, password, "");
+```
+
+**Auflösung je Laufzeitrolle:**
+
+**SSID:**
+- Source: `SOURCE_SSID` (Pflicht; leer → `RuntimeException`)
+- Destination: `DEST_SSID` (Pflicht; leer → `RuntimeException`)
+
+**Benutzername (zweistufig):**
+```
+SOURCE_USER  →  CONNECT_USER
+DEST_USER    →  CONNECT_USER
+```
+
+**Passwort (vierstufig):**
+```
+SOURCE_PASSWORD_CRYPT  →  SOURCE_PASSWORD  →  CONNECT_PASSWORD_CRYPT  →  CONNECT_PASSWORD
+DEST_PASSWORD_CRYPT    →  DEST_PASSWORD    →  CONNECT_PASSWORD_CRYPT  →  CONNECT_PASSWORD
+```
+
+`_CRYPT`-Werte werden durch `MigrationConfig.decodePW()` (`MigrationConfig.java:253-269`) reversibel dekodiert: Base64 → String umkehren → Base64. Scheitert der zweite Schritt, wird das erste Base64-Ergebnis als Klartext verwendet. **Das ist keine Verschlüsselung**, nur Obfuskation.
+
+**Minimale funktionierende `conf/migration.properties`:**
+```properties
+SOURCE_SSID=<source_ssid>
+DEST_SSID=<dest_ssid>
+CONNECT_USER=<user>
+CONNECT_PASSWORD=<password>
+MIGRATE_ITEMTYPES=<source_type>:<dest_type>
+CASCADE_DELETE_ON_MISSING=false
+```
+
+Bei getrennten Source-/Destination-Credentials `SOURCE_USER`/`SOURCE_PASSWORD` bzw. `DEST_USER`/`DEST_PASSWORD` setzen; `CONNECT_USER`/`CONNECT_PASSWORD` dienen dann nur als Fallback. Ein leeres Passwort in der niedrigsten Prioritätsstufe wird als `""` übergeben.
+
+Die WebGUI (`WebServer.java:1184-1189`) prüft vor jedem Run, ob überhaupt **irgendein** Passwort-Property gesetzt ist — `SOURCE_PASSWORD_CRYPT`, `SOURCE_PASSWORD`, `DEST_PASSWORD_CRYPT`, `DEST_PASSWORD`, `CONNECT_PASSWORD_CRYPT` oder `CONNECT_PASSWORD`. Fehlen alle, wird der Run mit `"Configuration has no CM password"` abgelehnt. `WEBGUI_ALLOW_PASSWORDLESS_CM_LOGIN=true` umgeht diese Prüfung — **ausgeschaltet lassen**.
+
+### 6.3.2 IBM-SDK-Konfiguration (`cmbcmenv.properties` und `cmbicmsrvs.ini`)
+
+**Der Migrator-Code liest diese Dateien nicht.** Sie werden ausschließlich vom IBM-CM-SDK selbst verwendet, das beim `ds.connect()` automatisch nach `cmbcmenv.properties` und `cmbicmsrvs.ini` im Classpath sucht.
+
+`CMConnection.java:92-108` prüft ihre Existenz nur einmal pro JVM im Debug-Log (DIAG-Block). Der Produktionscode öffnet oder parst diese Dateien nicht.
+
+**`cmbcmenv.properties`** setzt SDK-weite Parameter:
+```properties
+CMB.SERVERS.FILE=conf/cmbicmsrvs.ini
+CMB.CONNECTION.TIMEOUT=30000
+CMB.CONNECTION.RETRY=3
+CMB.TRACE.ENABLED=false
+CMB.CACHE.ENABLED=true
+```
+
+**`cmbicmsrvs.ini`** enthält die IBM-CM-Serverkonfiguration: `ICMSERVER`, `ICMHOSTNAME`, `ICMPORT`, `ICMNODENAME`, `ICMOSTYPE`, `ICMJDBCDRIVER`, `ICMJDBCURL`, `ICMDBAUTH`. Diese Werte teilen dem SDK mit, welcher CM-Server unter welcher SSID erreichbar ist. **Ohne diese Datei scheitert `ds.connect()` auf Transport-Ebene.**
+
+Damit das SDK sie findet, setzt `bin/start.sh:48+97`:
+```bash
+CONF_DIR="$(pwd)/conf"
+CP="bin/cm-migrator.jar:lib/*:$CONF_DIR:/opt/IBM/cm87_api/cmgmt/connectors/"
+"$JAVA_CMD" $JAVA_OPTS -Dcm.home="$CONF_DIR" -cp "$CP" com.ibm.ecm.migration.Main "$CONFIG_FILE"
+```
+
+`conf/` liegt im Classpath, damit das SDK `cmbcmenv.properties` dort findet. `cm.home` ist der IBM-SDK-Basispfad, unter dem es relativ nach weiteren Ressourcen sucht. `/opt/IBM/cm87_api/cmgmt/connectors/` enthält IBM-eigene Konnektorklassen.
+
+Vorlagen liegen unter `conf/cmbcmenv.properties.example` und `conf/cmbicmsrvs.ini.example`. Nach dem Kopieren und Ausfüllen Dateirechte auf `0600` setzen. Die ausgefüllten Dateien niemals versionieren — `.gitignore` schließt sie bereits aus.
+
 ### 6.4 Migration
 
 | Property | Pflicht | Standardwert | Bedeutung | Sicherheitshinweis |
