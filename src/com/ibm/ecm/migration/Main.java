@@ -40,12 +40,20 @@ public class Main {
             logger.warn("Could not read CLI shutdown grace; using 60 seconds: {}", e.getMessage());
         }
         CliShutdownLifecycle lifecycle = new CliShutdownLifecycle(graceSeconds);
-        // ponytail: local variable must be effectively final for the lambda.
-        @SuppressWarnings("resource")
-        String finalConfigPath = configPath;
-        return CliLifecycleRunner.executeCli(lifecycle, () -> startMigration(finalConfigPath));
-    }
+        final String finalConfigPath = configPath;
+        CliLifecycleRunner.CliRunResult result = CliLifecycleRunner.executeCli(
+                lifecycle, () -> startMigration(finalConfigPath));
 
+        Exception failure = result.failure();
+        if (failure instanceof RunTerminationException) {
+            RunTerminationException rte = (RunTerminationException) failure;
+            logger.error("Migration terminated: {}", rte.getMessage(), rte.getCause());
+        } else if (failure != null) {
+            logger.error("Migration failed", failure);
+        }
+
+        return result.exitCode();
+    }
     /**
      * Startet den Migrationsprozess basierend auf der angegebenen Konfigurationsdatei.
      * Wird auch von der WebGUI aufgerufen, um Ressourcenkonflikte zu vermeiden.

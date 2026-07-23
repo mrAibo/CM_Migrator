@@ -7,10 +7,26 @@ package com.ibm.ecm.migration;
  */
 final class CliLifecycleRunner {
 
-    /** ponytail: same functional shape as Main.CliOperation so no duplication. */
     @FunctionalInterface
     interface CliOperation {
         void run() throws Exception;
+    }
+
+    /** Immutable result carrying exit code and the preserved failure (if any). */
+    static final class CliRunResult {
+        final int exitCode;
+        final Exception failure;
+        final boolean terminationConfirmed;
+
+        CliRunResult(int exitCode, Exception failure, boolean terminationConfirmed) {
+            this.exitCode = exitCode;
+            this.failure = failure;
+            this.terminationConfirmed = terminationConfirmed;
+        }
+
+        int exitCode()   { return exitCode; }
+        Exception failure() { return failure; }
+        boolean terminationConfirmed() { return terminationConfirmed; }
     }
 
     private CliLifecycleRunner() {
@@ -19,27 +35,30 @@ final class CliLifecycleRunner {
     /**
      * Registers the lifecycle exactly once, runs the operation, and
      * guarantees {@link CliShutdownLifecycle#finish(boolean)} runs before
-     * the exit code is returned.  Does not terminate the VM.
+     * the result is returned.  Does not terminate the VM, does not log.
      */
-    static int executeCli(
+    static CliRunResult executeCli(
             CliShutdownLifecycle lifecycle,
             CliOperation operation) {
         boolean terminationConfirmed = true;
         int exitCode = 0;
+        Exception failure = null;
 
         try {
             lifecycle.register();
             operation.run();
         } catch (RunTerminationException e) {
+            failure = e;
             terminationConfirmed = e.isTerminationConfirmed();
             exitCode = e.getExitCode();
         } catch (Exception e) {
+            failure = e;
             terminationConfirmed = false;
             exitCode = 1;
         } finally {
             lifecycle.finish(terminationConfirmed);
         }
 
-        return exitCode;
+        return new CliRunResult(exitCode, failure, terminationConfirmed);
     }
 }
