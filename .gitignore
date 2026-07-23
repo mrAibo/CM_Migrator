@@ -4,6 +4,7 @@ target/
 *.class
 compile.log
 bin/cm-migrator.jar
+bin/META-INF/
 
 # Local Java runtimes
 java_env/

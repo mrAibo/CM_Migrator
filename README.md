@@ -2,7 +2,7 @@
 
 CM Migrator ist ein Java-Werkzeug für die Migration und Verifikation von Dokumenten zwischen IBM-Content-Manager-8.7-Systemen. Der aktuelle Stand unterstützt parallele Verarbeitung, H2-basierte Journale zur Wiederaufnahme, HTML-/CSV-Berichte, eine WebGUI und laufende Statusausgaben.
 
-Der in PR #1 gebündelte gehärtete Stand liegt bis zur Freigabe auf `hardening/security-baseline`; die Integration-Readiness-Änderungen aus PR #6 sind dort integriert. IBM-CM-Live-E2E, Credential-Rotation, Git-History-Purge, produktive Performance-/JNI-Abnahme, die Timeout-Policy und die im aktuellen Abschlussaudit dokumentierten lokalen Safety-/Hygiene-Blocker bleiben offen.
+IBM-CM-Live-E2E, Credential-Rotation, Git-History-Purge, produktive Performance-/JNI-Abnahme, die Timeout-Policy und die im aktuellen Abschlussaudit dokumentierten lokalen Safety-/Hygiene-Blocker bleiben offen.
 
 Für Installation, Betrieb, Konfigurationsreferenz, Fehlerbehebung und Wiederanlauf siehe das [Betriebshandbuch](BETRIEBSHANDBUCH.md).
 
@@ -26,7 +26,7 @@ Im aktuellen Code vorhanden sind:
 - optionale E-Mail-Benachrichtigung über lokal installiertes `mutt` oder `mailx`;
 - lokales JMX-MBean für Migrationsmetriken.
 
-Nicht jeder historische oder generierte Bestandteil des Repositorys ist ein unterstützter Einstieg. `run.sh` gehört zum separaten Prototyp unter `src/main/java/com/example/migrator/`, erwartet jedoch ein anders gebautes Root-JAR, das `bin/compile.sh` nicht erzeugt. Verwenden Sie für den dokumentierten aktuellen Betrieb `bin/cm-run.sh`.
+Verwenden Sie für den dokumentierten aktuellen Betrieb `bin/cm-run.sh`.
 
 ## Sicherheitsmodell
 
@@ -79,7 +79,7 @@ Diese Lifecycle-Eigenschaften sind lokal und strukturell getestet; ein Live-E2E-
 - Schreibrechte für Journal, Logs, Reports, temporäre Dateien, `status.html` und gegebenenfalls WebGUI-Run-Snapshots;
 - genügend freier Speicher für H2-Journale, Reports und Content-Temporärdateien.
 
-`pom.xml` deklariert Java 11 als Source-/Target-Level. `bin/compile.sh` ruft `javac` jedoch ohne `--release`/`-target` auf; das erzeugte JAR benötigt daher mindestens die Java-Version des verwendeten Build-JDKs. Für ein Java-11-Artefakt mit JDK 11 bauen oder den Bytecode separat verifizieren. `bin/compile.sh`, `bin/start.sh` und `bin/verify.sh` verwenden lokale JARs aus `lib/`. Der systemweite IBM-Pfad `/opt/IBM/cm87_api/lib` ist optional im Skript hinterlegt; fehlt er, wird gewarnt. Ein erfolgreicher Build mit lokalen JARs beweist noch keine funktionierende IBM-Live-Verbindung oder JNI-Kompatibilität.
+`pom.xml` dokumentiert den separaten Maven-/Legacy-Prototypen und gehört nicht zum aktiven, von `bin/compile.sh` gebauten Produktionsbaum.
 
 ### Optional
 
@@ -111,7 +111,6 @@ Ein `docs/`-Verzeichnis ist im aktuellen Branch nicht vorhanden. Projektdokument
 ```bash
 git clone https://github.com/mrAibo/CM_Migrator.git
 cd CM_Migrator
-git checkout hardening/security-baseline
 
 cp conf/migration.properties.example conf/migration.properties
 cp conf/webgui.properties.example conf/webgui.properties
@@ -201,6 +200,9 @@ bash tests/test-worker-failure-state.sh
 bash tests/test-webgui-auth-fail-closed.sh
 bash tests/test-webgui-delete-lifecycle.sh
 bash tests/test-tracked-config-hygiene.sh
+bash tests/test-run-lifecycle.sh
+bash tests/test-verifier-runtime-safety.sh
+bash tests/test-webgui-run-snapshot-security.sh
 ```
 
 `.github/workflows/test.yml` führt Shell-Syntax, `git diff --check` und alle IBM-unabhängigen Tests mit Java 17 aus. Der Hosted Runner materialisiert `lib/` nicht. `test-verifier-source-lookup-decision.sh` und `bin/compile.sh` benötigen die lokalen IBM-/Third-Party-Libraries und bleiben daher ein lokales beziehungsweise privates Gate; CI täuscht dafür keinen grünen Build vor.
@@ -217,7 +219,6 @@ Der Build:
 
 - kompiliert `src/com/ibm/ecm/migration/*.java` nach `target/`;
 - schreibt Compiler-Ausgabe nach `compile.log`;
-- erzeugt `bin/META-INF/MANIFEST.MF` mit `com.ibm.ecm.migration.Main`;
 - erstellt `bin/cm-migrator.jar`.
 
 Der separate Tree `src/main/java/com/example/migrator/` gehört zum Maven-/Legacy-Prototyp und wird von diesem Build nicht kompiliert.
@@ -228,7 +229,7 @@ Der separate Tree `src/main/java/com/example/migrator/` gehört zum Maven-/Legac
 
 - Kein bestätigter IBM-CM-Live-E2E-Test für Cascade-Delete-Tri-State, Worker-Fehlerweiterleitung oder WebGUI-Delete.
 - Hosted CI deckt nur IBM-unabhängige Tests ab; Verifier-Test und Gesamtbuild bleiben lokales/privates Gate mit freigegebenen Libraries.
-- Bereits veröffentlichte Credentials müssen unabhängig rotiert und in einer separat koordinierten Aktion aus der Git-Historie entfernt werden; dieser Branch führt keinen History-Rewrite aus.
+- Bereits veröffentlichte Credentials müssen unabhängig rotiert und in einer separat koordinierten Aktion aus der Git-Historie entfernt werden; dieses Repository führt keinen History-Rewrite aus.
 - Laufzeit und Build hängen von lokalen `lib/*.jar` sowie gegebenenfalls einem installationsspezifischen IBM-Systempfad ab.
 - Der optionale Pfad `/opt/IBM/cm87_api/lib` ist auf einem Build-Host möglicherweise nicht vorhanden.
 - `SourceLookupClassifier` hängt von beobachteten Exceptionmeldungen ab; unbekannte Meldungen werden sicher als `ERROR` behandelt.

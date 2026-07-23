@@ -1,6 +1,6 @@
 # Betriebshandbuch CM Migrator
 
-Dieses Handbuch beschreibt den auf `hardening/security-baseline` implementierten Stand. Für den kompakten Einstieg siehe [README.md](README.md).
+Dieses Handbuch beschreibt den aktuellen Code- und Skriptstand. Für den kompakten Einstieg siehe [README.md](README.md).
 
 ## 1. Zweck und Geltungsbereich
 
@@ -88,13 +88,6 @@ bin/start.sh --> Main
 | `bin/cascade-delete-guard.sh` | eigenständig testbarer Containment-Guard |
 | `bin/build-release.sh` | Release-Paketierung; Distribution ist nicht vollständig belegt |
 | `bin/deploy-source.sh` | erstellt ein Quellpaket unter dem Benutzer-Downloadverzeichnis; kein Laufzeit-Launcher |
-| `run.sh` | historischer Launcher für den separaten `com.example.migrator`-Prototyp; erwartet ein von `bin/compile.sh` nicht erzeugtes Root-JAR |
-| `bin/META-INF/MANIFEST.MF` | Buildmetadaten; `bin/cm-migrator.jar` wird lokal erzeugt und nicht getrackt |
-
-
-`bin/common.sh` ist im aktuellen Branch nicht vorhanden und daher weder Launcher noch gemeinsame Runtime-Abhängigkeit.
-
-`FastBatchItemMigrator` akzeptiert im Legacy-Tree `-c`/`--config`, `-i`/`--itemType` und `-h`/`--help`. `run.sh` reicht diese Argumente weiter, ist im aktuellen Checkout aber kein unterstützter ausführbarer Pfad, weil das erwartete Root-JAR nicht durch `bin/compile.sh` entsteht.
 
 ### 3.2 Vollständiges Java-Klasseninventar
 
@@ -122,7 +115,7 @@ bin/start.sh --> Main
 | `status.html`, `.status.html.tmp` | laufendes Dashboard und atomarer Zwischenstand | Betriebs-/Systemdaten | kurzlebig; nicht versionieren |
 | `data/webgui-runs/*.properties` | WebGUI-Run-Snapshots | **hochsen­sitiv**, vollständige Properties einschließlich Credentials möglich | restriktiv schützen; nach Freigabe bereinigen; nicht versionieren |
 | `debug_mail/*.html` | lokal erzeugte E-Mail-Bodies | Reportdaten/PIDs möglich | kurzzeitig aufbewahren; nicht versionieren |
-| `target/`, `bin/cm-migrator.jar`, `compile.log` | Build-Artefakte | kein Primärdatenbestand | reproduzierbar; nicht versionieren |
+| `target/`, `bin/cm-migrator.jar` | Build-Artefakte | kein Primärdatenbestand | reproduzierbar; nicht versionieren |
 | temporäre Contentdateien | Fallback für Content-Upload | können Originalcontent enthalten | nach Lauf auf Reste prüfen; nie versionieren |
 | `webapp/` | statische WebGUI-Dateien | keine Secrets einbetten | mit Release versionieren/sichern |
 | extern bereitgestellter Signing-Keystore | Release-Signierung | hochsensitiv | nicht versionieren; historisch veröffentlichte Keystore-Werte als kompromittiert behandeln und rotieren |
@@ -136,16 +129,16 @@ Code-Defaults für temporäre Dateien: kleine Dateien verwenden `java.io.tmpdir`
 - **Logging:** `conf/log4j2.xml`, `conf/cmblogconfig.properties`; Connector-Logs bleiben ungetrackt.
 - **IBM-Runtime-Ressourcen:** lokale, ignorierte `conf/cmbcmenv.properties`, `conf/cmbicmsrvs.ini` und optional `conf/ibmcmconfig.properties`; aus den neutralen Vorlagen beziehungsweise der freigegebenen Installation erzeugen.
 - **Bereinigter Altbestand:** umgebungsspezifische Migrationsprofile, Config-Backups, Laufreports, Debug-Mails, Statusseiten, Source-Backups, generiertes JAR und historischer Keystore sind am Branch-Tip nicht mehr getrackt. Lokale Operator-Dateien wurden bei der Bereinigung nicht gelöscht. Rotation und History-Purge bleiben separate Aufgaben.
-- **Build-/Legacy-Konfiguration:** `pom.xml`, `tools/proguard.conf` und `src/main/resources/log4j2.xml`. Letztere gehört zum separaten `com.example.migrator`-Tree; für dessen `migrator.properties` existiert keine neutrale Vorlage.
+- **Build-/Legacy-Konfiguration:** `pom.xml` und `tools/proguard.conf`. Der Maven-/Legacy-Tree unter `src/main/java/com/example/migrator/` wird von `bin/compile.sh` nicht gebaut; für dessen `migrator.properties` existiert keine neutrale Vorlage.
 
 ### 4.2 Vollständiges Testinventar
 
-- Shell-Runner: `tests/test-cascade-delete-guard.sh`, `tests/test-source-lookup-classifier.sh`, `tests/test-verifier-source-lookup-decision.sh`, `tests/test-worker-failure-state.sh`, `tests/test-webgui-auth-fail-closed.sh`, `tests/test-webgui-delete-lifecycle.sh`, `tests/test-tracked-config-hygiene.sh`.
+- Shell-Runner: `tests/test-cascade-delete-guard.sh`, `tests/test-source-lookup-classifier.sh`, `tests/test-verifier-source-lookup-decision.sh`, `tests/test-worker-failure-state.sh`, `tests/test-webgui-auth-fail-closed.sh`, `tests/test-webgui-delete-lifecycle.sh`, `tests/test-tracked-config-hygiene.sh`, `tests/test-run-lifecycle.sh`, `tests/test-verifier-runtime-safety.sh`, `tests/test-webgui-run-snapshot-security.sh`.
 - Java-Testprogramme: `SourceLookupClassifierTest`, `VerifierSourceLookupDecisionTest`, `WorkerFailureStateTest`, `AuthHandlerConfigurationTest`; die kleinen Log4j-Teststubs liegen unter `tests/stubs/`.
 
 ### 4.3 Berichts- und Dokumentationsinventar
 
-- Technische Top-Level-Dokumente: `README.md`, `BETRIEBSHANDBUCH.md`, `SECURITY.md`, `ARCHITEKTUR.md`, `ANLEITUNG_SLES15.md`, `SECURITY_P0_INTEGRATION_BERICHT.md`, `PR3_FAIL_CLOSED_REPORT.md`, `P0_WORKER_FAILURE_PROPAGATION_BERICHT.md`.
+- Technische Top-Level-Dokumente: `README.md`, `BETRIEBSHANDBUCH.md`, `SECURITY.md`, `ARCHITEKTUR.md`, `SECURITY_P0_INTEGRATION_BERICHT.md`, `PR3_FAIL_CLOSED_REPORT.md`, `P0_WORKER_FAILURE_PROPAGATION_BERICHT.md`.
 - Laufreports, Statusseiten und `debug_mail/` werden lokal erzeugt und nicht getrackt.
 - Unter `reports/templates/` bleiben nur die wiederverwendbaren Protokollvorlagen, die Template-Dokumentation und das Bildasset versioniert.
 - Der bereits integrierte `WorkerFailureState`-Pfad wird direkt durch Produktionscode und `test-worker-failure-state.sh` abgesichert; einmalige Patch-/Apply-Artefakte wurden entfernt.
@@ -161,7 +154,6 @@ Getrackte Projektbereiche sind `src/`, `bin/`, `conf/`, `lib/`, `tests/`, `webap
 ```bash
 git clone https://github.com/mrAibo/CM_Migrator.git
 cd CM_Migrator
-git checkout hardening/security-baseline
 git status --short
 ```
 
@@ -176,7 +168,7 @@ test -r lib/cmbicmsdk81.jar
 compgen -G 'lib/h2-*.jar' >/dev/null
 ```
 
-Der Build benötigt JDK 11+. `pom.xml` deklariert Source/Target 11, aber `bin/compile.sh` ruft `javac` ohne `--release`/`-target` auf. Sein JAR benötigt deshalb mindestens die Version des verwendeten Build-JDKs; für ein Java-11-Artefakt mit JDK 11 bauen oder den Bytecode separat verifizieren. Die Java-Version muss zusätzlich mit dem installierten IBM-CM-SDK und dessen Native Libraries kompatibel sein. Ein vorhandenes JAR beweist keine JNI- oder Serverkompatibilität.
+Der Build benötigt JDK 11+. `bin/compile.sh` ruft `javac` ohne `--release`/`-target` auf; das erzeugte JAR benötigt deshalb mindestens die Version des verwendeten Build-JDKs. Für ein Java-11-Artefakt mit JDK 11 bauen oder den Bytecode separat verifizieren. Die Java-Version muss zusätzlich mit dem installierten IBM-CM-SDK und dessen Native Libraries kompatibel sein. Ein vorhandenes JAR beweist keine JNI- oder Serverkompatibilität.
 
 ### 5.3 Vorlagen kopieren und Rechte setzen
 
@@ -384,8 +376,6 @@ Bei aktivierter Auth validiert `WebServer` die Konfiguration vor dem Port-Bind. 
 | `CM_JAVA_OPTS` | nein | leer | zusätzliche JVM-Argumente | nur freigegebene Werte; keine Secrets in Prozessliste |
 
 `conf/log4j2.xml` setzt `INFO` für Konsole und `migration.log`; `verification_errors.log` erhält `ERROR`. Beide Rolling Files rotieren bei 10 MB mit bis zu fünf Archiven. `JVM_OPTS` als Eintrag in einer Properties-Datei wird von den Launchern nicht als JVM-Option gelesen.
-
-`src/main/resources/log4j2.xml` gehört nur zum Legacy-Maven-Tree und schreibt separat nach `logs/migrator.log`; es konfiguriert den aktuellen `bin/compile.sh`-Betrieb nicht.
 
 Die Launcher setzen außerdem interne JVM-Properties wie `cm.migrator.run.config`, `cm.migrator.cmHome`, `cm.home`, `log4j.configurationFile` und `java.library.path`. Die Verify-Umgebungsvariablen werden auf `cm.migrator.verify.sortMode`, `cm.migrator.verify.worklistMode` und `cm.migrator.verify.autoMarkForRemigration` abgebildet; `CM_CONSOLE_MODE` wird als `cm.migrator.console.mode` weitergegeben. Diese internen Übergabewerte nicht dauerhaft in `migration.properties` duplizieren.
 
@@ -927,6 +917,9 @@ bash tests/test-worker-failure-state.sh
 bash tests/test-webgui-auth-fail-closed.sh
 bash tests/test-webgui-delete-lifecycle.sh
 bash tests/test-tracked-config-hygiene.sh
+bash tests/test-run-lifecycle.sh
+bash tests/test-verifier-runtime-safety.sh
+bash tests/test-webgui-run-snapshot-security.sh
 bash bin/compile.sh
 git diff --check
 ```
@@ -942,6 +935,9 @@ Einordnung:
 | `test-webgui-auth-fail-closed.sh` | dependency-freier Java-/Strukturtest der Auth-Konfiguration vor Port-Bind |
 | `test-webgui-delete-lifecycle.sh` | dependency-freier Struktur-/Lifecycle-Test des eingebetteten Delete-Pfads |
 | `test-tracked-config-hygiene.sh` | dependency-freier Tracking-/Vorlagen-Regressionstest |
+| `test-run-lifecycle.sh` | lokaler Shell-Test der Run-Lifecycle-Eigenschaften |
+| `test-verifier-runtime-safety.sh` | lokaler Shell-Test der Verifier-Runtime-Safety |
+| `test-webgui-run-snapshot-security.sh` | lokaler Shell-Test der WebGUI-Run-Snapshot-Sicherheit |
 | `bin/compile.sh` | lokaler Java-Compile-/JAR-Build mit vorhandenen freigegebenen Libraries |
 
 `.github/workflows/test.yml` verwendet minimale Read-only-Rechte, Ubuntu und Temurin 17. Ein Sparse-Checkout materialisiert `lib/` nicht. CI führt Shell-Syntax, `git diff --check` und alle IBM-unabhängigen Tests aus. `test-verifier-source-lookup-decision.sh` und der Gesamtbuild bleiben wegen IBM-SDK-/JNI-/Lizenzabhängigkeit ein lokales beziehungsweise privates Gate; es wird kein grüner Hosted-CI-Build vorgetäuscht.
