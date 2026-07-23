@@ -32,19 +32,16 @@ public class Producer implements Runnable {
     private final MigrationStats stats;
     private final WorkerFailureState workerFailureState;
     private final int consumerCount;
-    // ponytail: OperatorConsole ref for dashboard phase/strategy updates
-    private OperatorConsole operatorConsole;
 
     private static final Pattern VALID_ITEM_TYPE = Pattern.compile("[a-zA-Z0-9_]+");
 
     public Producer(BlockingQueue<MigrationItem> queue, MigrationConfig config, MigrationJournal journal,
-                    MigrationStats stats, WorkerFailureState workerFailureState, OperatorConsole operatorConsole) {
+                    MigrationStats stats, WorkerFailureState workerFailureState) {
         this.queue = queue;
         this.config = config;
         this.journal = journal;
         this.stats = stats;
         this.workerFailureState = workerFailureState;
-        this.operatorConsole = operatorConsole;
         this.consumerCount = config.getThreadCount();
     }
 
@@ -212,10 +209,6 @@ public class Producer implements Runnable {
             // PASS 1: Zählen (TOTAL) - immer, auch bei DELETE.
             // Wichtig: Total muss vor PASS2 stabil sein und darf während Enqueue nicht wachsen.
             String strategy = config.getProducerCountStrategy();
-            if (operatorConsole != null) {
-                operatorConsole.setStrategy(strategy);
-                operatorConsole.setPhase(OperatorConsole.Phase.COUNTING);
-            }
             long totalMatched = 0;
             
             logger.info("Using SDK-based PASS1 count for {} (Strategy={}, OperationMode={})",
@@ -244,7 +237,6 @@ public class Producer implements Runnable {
             }
 
             // PASS 2: Enqueue (Verarbeitung)
-            if (operatorConsole != null) operatorConsole.setPhase(OperatorConsole.Phase.DISCOVERING);
             dkResultSetCursor cursor2 = ds.execute(query, DKConstant.DK_CM_XQPE_QL_TYPE, options);
             
             long fetched = 0;
