@@ -397,6 +397,32 @@ public class MigrationJournal implements AutoCloseable {
         return loaded;
     }
 
+    // ── OperatorConsole snapshot methods (package-private) ──
+
+    int getJournalQueueSize() { return journalQueue.size(); }
+    int getJournalQueueCapacity() { return journalQueue.size() + journalQueue.remainingCapacity(); }
+
+    long getPersistedCount() {
+        long count = 0;
+        for (String status : statusCache.values()) {
+            if ("SUCCESS".equals(status) || "DELETED".equals(status)) count++;
+        }
+        return count;
+    }
+
+    String getJournalHealth() {
+        if (writerFailure != null) return "FAILED";
+        if (!running.get()) return journalQueue.isEmpty() ? "CLOSED" : "DRAINING";
+        if (journalQueue.size() > journalQueue.remainingCapacity() / 2) return "BACKPRESSURE";
+        return "HEALTHY";
+    }
+
+    String getJournalError() {
+        return writerFailure != null ? writerFailure.getMessage() : null;
+    }
+
+    // ── end snapshot methods ──
+
     @Override
     public void close() {
         logger.info("Closing MigrationJournal. Draining queue ({} entries left)...", journalQueue.size());

@@ -367,7 +367,7 @@ Der Versand verwendet lokal `mutt`, sonst `mailx`. Fehlen beide oder scheitert d
 
 Bei aktivierter Auth validiert `WebServer` die Konfiguration vor dem Port-Bind. Fehlender Benutzer, fehlendes Passwort/Hash, ein ungültiger Auth-Schalter oder ein nicht exakt 64-stelliger Hex-Hash brechen den Start ohne Secretwert im Fehlertext ab; es wird kein temporäres Passwort erzeugt oder geloggt. Fehlversuche werden pro ermittelter Client-IP gezählt; nach fünf Fehlern gilt eine fünfminütige Sperre. Ein ungeprüftes `X-Forwarded-For` kann die IP-Ermittlung beeinflussen.
 
-### 6.14 Monitoring und Logging
+### 6.14 Monitoring and Logging
 
 | Schalter | Pflicht | Standardwert | Bedeutung | Sicherheitshinweis |
 |---|---|---|---|---|
@@ -375,7 +375,13 @@ Bei aktivierter Auth validiert `WebServer` die Konfiguration vor dem Port-Bind. 
 | `NO_COLOR`, `TERM` | nein | umgebungsabhängig | ANSI-Farben | keine fachliche Wirkung |
 | `CM_JAVA_OPTS` | nein | leer | zusätzliche JVM-Argumente | nur freigegebene Werte; keine Secrets in Prozessliste |
 
-`conf/log4j2.xml` setzt `INFO` für Konsole und `migration.log`; `verification_errors.log` erhält `ERROR`. Beide Rolling Files rotieren bei 10 MB mit bis zu fünf Archiven. `JVM_OPTS` als Eintrag in einer Properties-Datei wird von den Launchern nicht als JVM-Option gelesen.
+### Console-Dashboard System Properties
+
+| Property | Default | Beschreibung |
+|---|---|---|
+| `cm.migrator.console.mode` | `auto` | `pretty` = ANSI in-place dashboard, `plain` = eine Logzeile pro Sekunde, `auto` = erkennt interaktives Terminal |
+
+`conf/log4j2.xml` setzt `INFO` für Konsole und `migration.log`;
 
 Die Launcher setzen außerdem interne JVM-Properties wie `cm.migrator.run.config`, `cm.migrator.cmHome`, `cm.home`, `log4j.configurationFile` und `java.library.path`. Die Verify-Umgebungsvariablen werden auf `cm.migrator.verify.sortMode`, `cm.migrator.verify.worklistMode` und `cm.migrator.verify.autoMarkForRemigration` abgebildet; `CM_CONSOLE_MODE` wird als `cm.migrator.console.mode` weitergegeben. Diese internen Übergabewerte nicht dauerhaft in `migration.properties` duplizieren.
 

@@ -71,6 +71,10 @@ public class MigrationStats {
         return failedItems.get();
     }
 
+    public long getDiscoveredItems() {
+        return discoveredItems.get();
+    }
+
     public long getErrorItems() {
         return failedItems.get(); // Alias für getFailedItems()
     }
