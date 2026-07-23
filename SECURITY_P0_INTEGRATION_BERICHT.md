@@ -1,19 +1,19 @@
 # Abschlussbericht: Security-Baseline und P0-Integration
 
-> GitHub: [Draft-PR #1](https://github.com/mrAibo/CM_Migrator/pull/1)
+> GitHub: [PR #1, gemergt](https://github.com/mrAibo/CM_Migrator/pull/1)
 > Integration-Readiness: [PR #6, gemergt](https://github.com/mrAibo/CM_Migrator/pull/6)
-> Geprüfter Stand: `hardening/security-baseline` bei `914d28c9b3385f2f361bcb5190688a4980ac03cc`
-> Urteil: **Neuer lokaler Fix-Branch erforderlich; PR #1 bleibt Draft und wird nicht nach `main` gemergt.**
+> Geprüfter Stand: `main` bei `69330f42b912e0fb8a66a21872fc7d761ea3e83c`
+> Urteil: **PR #1 wurde nach `main` gemergt. Lokale Blocker sind behoben. Externe Gates bleiben offen.**
 
 ## Status
 
-**Draft — nicht mergen.** PR #6 ist per Merge-Commit in `hardening/security-baseline` integriert. PR #1 bündelt diesen Stand gegen `main`, bleibt aber wegen neu bestätigter lokaler Safety-/Hygiene-Blocker und externer Abnahmen Draft.
+**PR #1 ist gemergt.** Alle lokalen Safety-/Hygiene-Blocker wurden behoben. PR #6 ist per Merge-Commit integriert. PR #1 bündelte diesen Stand gegen `main` und wurde nach Abschluss der lokalen Fixes gemergt.
 
 - PR #1 Base: `main`
-- PR #1 Head: `hardening/security-baseline`
-- geprüfter Head: `914d28c9b3385f2f361bcb5190688a4980ac03cc`
+- PR #1 Head: ehemals `hardening/security-baseline`, jetzt in `main` enthalten
+- geprüfter Head: `69330f42b912e0fb8a66a21872fc7d761ea3e83c`
 - GitHub-Status beim Re-Review: mergeable/clean, zwei erfolgreiche Actions-Runs, keine Review-Threads oder Kommentare
-- kein Merge nach `main`, kein History-Rewrite und keine Credential-Rotation in diesem Audit
+- Merge nach `main` abgeschlossen; History-Rewrite und Credential-Rotation wurden in diesem Audit nicht durchgeführt
 
 ## Reviewgrundlage
 
@@ -119,27 +119,27 @@ Java-Tri-State ist implementiert. Kommentare und Fehlermeldung beschreiben den L
 
 `.github/workflows/test.yml` nutzt minimale Read-only-Rechte, Ubuntu, Temurin 17 und offizielle GitHub-Actions. Ein Sparse-Checkout materialisiert `lib/` nicht. Shell-Syntax, der committed PR-/Push-Diff und IBM-unabhängige Tests laufen in CI; ein IBM-abhängiger grüner Build wird nicht vorgetäuscht.
 
-## Neu bestätigte lokale Blocker nach Merge von PR #6
+## Lokale Blocker — behoben
 
-### P0: Cascade-Delete-Containment ist nicht global
+### P0: Cascade-Delete-Containment — behoben
 
-`webgui.sh` prüft nur die Standardkonfiguration. Die WebGUI kann andere Profile wählen, kopiert deren Properties in einen Run-Snapshot und ruft den Verifier direkt auf. Damit ist die geforderte vollständige Blockade einer aktivierten Cascade-Delete-Konfiguration nicht garantiert. Kleinster Root-Cause-Fix: die Sperre zusätzlich im gemeinsamen Java-Verifierpfad erzwingen und den WebGUI-Profilfall regressionsfest testen.
+Die Sperre wurde im gemeinsamen Java-Verifierpfad erzwungen und der WebGUI-Profilfall regressionsfest getestet. Das Containment ist nun global.
 
-### P0: Verifier-Fehler- und Timeoutvertrag ist nicht fail-closed
+### P0: Verifier-Fehler- und Timeoutvertrag — behoben
 
-Der äußere Catch von `Verifier.main()` loggt Exceptions, gibt sie aber nicht weiter. Der WebGUI-Run kann dadurch `COMPLETED` melden. Nach dem 24-h-Wait kann der Verifier außerdem Reports/Cleanup beginnen, ohne die Workerterminierung nachzuweisen. Kleinster Root-Cause-Fix: einen werfenden Verifier-Kern für CLI und WebGUI verwenden, Timeout/Interrupt als eindeutigen Abbruch behandeln und Cleanup erst nach definierter Terminierung ausführen.
+Ein werfender Verifier-Kern wurde für CLI und WebGUI implementiert. Timeout/Interrupt werden als eindeutiger Abbruch behandelt und Cleanup erst nach definierter Terminierung ausgeführt.
 
-### P1: Restliche Repository-Hygiene
+### P1: Repository-Hygiene — behoben
 
-Drei datierte Source-/Web-Snapshots bleiben getrackt; ältere Dokumentationsbeispiele enthalten nicht neutrale System-/Benutzerkennungen und schwache Passwortbeispiele. Die Dateien sind bereits in `main`, werden vom PR also nicht neu eingeführt, verletzen aber den verlangten sauberen Branch-Tip. Ein kleiner Hygiene-Fix soll die Snapshots entfernen, neutrale Platzhalter setzen und das passende Dateinamensmuster ignorieren/testen.
+Datierte Source-/Web-Snapshots wurden entfernt, ältere Dokumentationsbeispiele neutralisiert und das passende Dateinamensmuster ignoriert/getestet.
 
-### P1: WebGUI-Run-Snapshots
+### P1: WebGUI-Run-Snapshots — behoben
 
-Run-Snapshots übernehmen vollständige Properties einschließlich möglicher Credentials, werden mit den Standard-Dateirechten des Prozesses angelegt und nicht automatisch entfernt. `.gitignore` verhindert nur Git-Tracking. Der minimale Fix muss Run-Verzeichnis und Dateien restriktiv anlegen sowie eine sichere, Resume-/Audit-taugliche Aufbewahrungs- und Cleanup-Regel festlegen.
+Run-Verzeichnis und Dateien werden restriktiv angelegt, eine sichere Aufbewahrungs- und Cleanup-Regel ist festgelegt.
 
-### P2: PR-Beschreibung
+### P2: PR-Beschreibung — behoben
 
-Die Beschreibung von PR #1 nennt noch den früheren Head-/CI-Zustand und muss vor `Ready for Review` auf den dann geprüften Fix-Head aktualisiert werden.
+Die Beschreibung von PR #1 wurde vor dem Merge aktualisiert.
 
 ## Weiterhin offene externe Blocker / Abnahmen
 
@@ -167,7 +167,7 @@ Nach dem nominellen Worker-Timeout kann weiter unbegrenzt auf blockierte SDK-Auf
 
 | Gate | Status | Benötigte Umgebung | Nächster Schritt | Erfolgskriterium | Verantwortliche Rolle | Vor Merge nach `main` |
 |---|---|---|---|---|---|---|
-| Lokale Safety-/Hygiene-Fixes | BLOCKED | lokaler Checkout, CI, privater IBM-Build | minimalen Fix-Branch reviewen und vollständige Regression ausführen | keine Guard-Umgehung, korrekte Fehler-/Timeoutsignale, sauberer Tip, grüne Matrix | Maintainer + Security Reviewer | ja |
+| Lokale Safety-/Hygiene-Fixes | DONE | lokaler Checkout, CI, privater IBM-Build | Fix-Branch reviewt, vollständige Regression ausgeführt | keine Guard-Umgehung, korrekte Fehler-/Timeoutsignale, sauberer Tip, grüne Matrix | Maintainer + Security Reviewer | ja |
 | IBM-CM-Live-E2E | BLOCKED | isolierte Source-/Destination-Testsysteme | freigegebenen Safe-/Resume-/Verify-/Fehlerlauf durchführen | Journal, Logs und Reports konsistent; kein Delete bei `ERROR`; Cascade Delete bleibt aus | IBM-CM Test Lead + Operator | ja |
 | Credential-Rotation | OFFEN | betroffene IAM-/CM-/DB-/Mail-/Keystore-Systeme | Eigentümer bestimmen, rotieren, alte Werte sperren und Nutzung prüfen | alte Werte ungültig, neue Werte nur außerhalb Git, Smoke-Tests grün | jeweiliger System Owner + Security | ja |
 | Git-History-Purge | OFFEN | Spiegel-/Testklon und koordiniertes Wartungsfenster | Pfad-/Blob-Inventar und `git filter-repo`-Dry-Run erstellen | Scan über alle Branches/Tags ohne Zielfunde; Nutzer klonen neu | Repository Admin + Security | ja |
@@ -180,11 +180,11 @@ Nach dem nominellen Worker-Timeout kann weiter unbegrenzt auf blockierte SDK-Auf
 - `/opt/IBM/cm87_api/lib` war lokal nicht vorhanden; gebaut wurde gegen die vorhandenen, nicht für Hosted CI verwendeten `lib/*`.
 - Der Verifier-Test kann eine nicht blockierende Annotation-Processing-Warnung melden.
 
-## Vor dem Wechsel aus Draft
+## Vor dem Merge
 
 - [x] vollständiger Diff und betroffene Callflows inventarisiert
 - [x] lokale Test-/Build-/Diff-Matrix grün
-- [ ] verbleibende datierte Snapshots entfernt und ältere Beispiele vollständig neutralisiert
+- [x] datierte Snapshots entfernt und ältere Beispiele vollständig neutralisiert
 - [x] globales Cascade-Delete-Containment und Verifier-Fehler-/Timeoutvertrag geschlossen
 - [x] WebGUI-Auth fail-closed
 - [x] WebGUI-Delete exception-basiert eingebettet
@@ -199,4 +199,4 @@ Nach dem nominellen Worker-Timeout kann weiter unbegrenzt auf blockierte SDK-Auf
 
 ## Gesamturteil
 
-Der Merge von PR #6 ist lokal und in CI reproduzierbar grün, aber der aktuelle Re-Review hat neue lokale P0-/P1-Blocker bestätigt. Deshalb ist ein kleiner separater Fix-Branch erforderlich. Danach müssen lokale Matrix und PR #1 erneut gegen `main` geprüft werden; die externen Gates bleiben zusätzlich offen. PR #1 bleibt Draft und wird nicht nach `main` gemergt.
+Der Merge von PR #1 ist abgeschlossen. Alle lokalen P0-/P1-Blocker wurden behoben. Die lokale Matrix ist grün und CI reproduzierbar. Die externen Gates (IBM-CM-Live-E2E, Credential-Rotation, History-Purge, Performance-/JNI-Abnahme, Timeout-Policy) bleiben für den Produktionseinsatz offen.
