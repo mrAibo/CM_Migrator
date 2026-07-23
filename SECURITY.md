@@ -9,8 +9,12 @@ Create local configuration files from the committed examples:
 ```bash
 cp conf/migration.properties.example conf/migration.properties
 cp conf/webgui.properties.example conf/webgui.properties
-cp conf/cmbicmenv.ini.example conf/cmbicmenv.ini
-chmod 600 conf/migration.properties conf/webgui.properties conf/cmbicmenv.ini
+cp conf/cmbcmenv.properties.example conf/cmbcmenv.properties
+cp conf/cmbicmsrvs.ini.example conf/cmbicmsrvs.ini
+# Optional, only when required by the approved IBM SDK setup:
+# cp conf/ibmcmconfig.properties.example conf/ibmcmconfig.properties
+chmod 600 conf/migration.properties conf/webgui.properties \
+  conf/cmbcmenv.properties conf/cmbicmsrvs.ini
 ```
 
 Prefer environment variables or an operating-system secret facility for credentials. The legacy CM password encoding is reversible and must not be treated as encryption.

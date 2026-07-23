@@ -89,6 +89,39 @@ public class Verifier {
     }
 
     public static void main(String[] args) {
+        System.exit(runCli(args));
+    }
+
+    public static int runCli(String[] args) {
+        ShutdownCoordinator.reset();
+        String configPath = args.length > 0 ? args[0] : "conf/migration.properties";
+        long graceSeconds = 60L;
+        try {
+            graceSeconds = new MigrationConfig(configPath).getShutdownGraceSeconds();
+        } catch (Exception e) {
+            logger.warn("Could not read CLI shutdown grace; using 60 seconds: {}", e.getMessage());
+        }
+
+        CliShutdownLifecycle lifecycle = new CliShutdownLifecycle(graceSeconds);
+        boolean terminationConfirmed = true;
+        try {
+            lifecycle.register();
+            run(configPath);
+            return 0;
+        } catch (RunTerminationException e) {
+            terminationConfirmed = e.isTerminationConfirmed();
+            logger.error("Verification terminated: {}", e.getMessage(), e.getCause());
+            return e.getExitCode();
+        } catch (Exception e) {
+            logger.error("Verification crashed", e);
+            return 1;
+        } finally {
+            lifecycle.finish(terminationConfirmed);
+        }
+    }
+
+    /** Shared throwing verifier core used by CLI, WebGUI, and internal callers. */
+    public static void run(String configPath) throws Exception {
         // Zeige den Start Banner
         System.out.println(ConsoleUI.banner("2.2.1"));
         System.out.println(ConsoleUI.info("Verification Tool (Robust Mode)"));
@@ -103,18 +136,17 @@ public class Verifier {
             consoleLogger.warn("Diagnostic re-verification of existing non-OK verification rows; no migration/remigration is performed.");
         }
 
-        String configPath = "conf/migration.properties";
-        if (args.length > 0) {
-            configPath = args[0];
-        }
-
         CMConnectionPool pool = null;
         ExecutorService executor = null;
-        ScheduledExecutorService progressExecutor = null;
         VerificationLogger verificationLogger = null;
+        Thread monitorThread = null;
+        int shutdownGraceSeconds = 60;
+        boolean terminationConfirmed = true;
 
         try {
             MigrationConfig config = new MigrationConfig(configPath);
+            OperationalPolicy.enforceCascadeDeleteDisabled(config);
+            shutdownGraceSeconds = config.getShutdownGraceSeconds();
             int threadCount = config.getThreadCount();
             // Journal base directory (muss absolut sein für H2 2.x)
             String journalDir = config.getDbPath(); // lese DB_PATH 
@@ -160,8 +192,6 @@ public class Verifier {
                     new ThreadPoolExecutor.CallerRunsPolicy()
             );
 
-            setupShutdownHook(executor, pool, verificationLogger);
-
             consoleLogger.info("Initialized Thread Pool with " + threadCount + " threads (queueCapacity=" + queueCapacity + ").");
 
             MigrationStats stats = new MigrationStats() {
@@ -185,12 +215,10 @@ public class Verifier {
             String mappingStr = String.join(", ", mapLines);
             if (mappingStr.length() > 40) mappingStr = mappingStr.substring(0, 37) + "...";
 
-            Thread monitorThread = null;
-
             // 3. Lese Journal Einträge per ItemType
             if (mapping == null || mapping.isEmpty()) {
-                consoleLogger.error("No MIGRATEITEMTYPES configured - cannot verify without knowing journal DB names.");
-                return;
+                throw new IllegalStateException(
+                        "No MIGRATE_ITEMTYPES configured; verification cannot start.");
             }
 
             java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.atomic.AtomicIntegerArray> typeResultsAtomic = new java.util.concurrent.ConcurrentHashMap<>();
@@ -216,7 +244,8 @@ public class Verifier {
                     totalWorkload += countForType;
                     consoleLogger.info("Verifier PASS1 workload {}: {} row(s)", sourceItemType, countForType);
                 } catch (Exception e) {
-                    logger.error("Error counting verifier workload for " + sourceItemType, e);
+                    throw new IllegalStateException(
+                            "Could not read verifier workload for item type " + sourceItemType, e);
                 }
             }
 
@@ -331,22 +360,38 @@ public class Verifier {
                         }
                     }
                 } catch (Exception e) {
-                    logger.error("Error reading journal for " + sourceItemType, e);
+                    throw new IllegalStateException(
+                            "Could not queue verifier work for item type " + sourceItemType, e);
                 }
             }
 
-            // 4. Shutdown and Wait
-            executor.shutdown();
-            
+            // 4. Bounded two-stage shutdown and wait.
+            WorkerTermination.Outcome termination;
             try {
-                if (!executor.awaitTermination(24, TimeUnit.HOURS)) {
-                    logger.warn("Verifier executor did not finish within timeout. Requesting graceful shutdown.");
-                    executor.shutdown();
-                }
+                termination = WorkerTermination.await(
+                        executor,
+                        config.getWorkerTimeoutSeconds(),
+                        shutdownGraceSeconds,
+                        ShutdownCoordinator::requestShutdown);
             } catch (InterruptedException e) {
-                logger.warn("Verifier main thread interrupted. Requesting graceful shutdown.");
-                executor.shutdown();
-                Thread.currentThread().interrupt();
+                terminationConfirmed = WorkerTermination.awaitGraceAfterInterrupt(
+                        executor, shutdownGraceSeconds, ShutdownCoordinator::requestShutdown);
+                throw new RunTerminationException(
+                        RunTerminationException.Reason.INTERRUPTED,
+                        "Verification interrupted by operator request.",
+                        terminationConfirmed,
+                        e);
+            }
+
+            terminationConfirmed = termination.terminated();
+            if (termination.timedOut()) {
+                throw new RunTerminationException(
+                        RunTerminationException.Reason.TIMEOUT,
+                        terminationConfirmed
+                                ? "Verification timed out; workers stopped during the grace period."
+                                : "Verification timed out; worker termination is not confirmed.",
+                        terminationConfirmed,
+                        null);
             }
 
             // Signal shutdown to pool
@@ -404,40 +449,66 @@ public class Verifier {
             }
             // -------------------------------
 
+        } catch (RunTerminationException e) {
+            terminationConfirmed = e.isTerminationConfirmed();
+            throw e;
+        } catch (InterruptedException e) {
+            if (executor != null && !executor.isTerminated()) {
+                terminationConfirmed = WorkerTermination.awaitGraceAfterInterrupt(
+                        executor, shutdownGraceSeconds, ShutdownCoordinator::requestShutdown);
+            } else {
+                terminationConfirmed = true;
+                Thread.currentThread().interrupt();
+            }
+            throw new RunTerminationException(
+                    RunTerminationException.Reason.INTERRUPTED,
+                    "Verification interrupted by operator request.",
+                    terminationConfirmed,
+                    e);
         } catch (Exception e) {
-            logger.error("Verification crashed", e);
+            if (executor != null && !executor.isTerminated()) {
+                try {
+                    terminationConfirmed = WorkerTermination.awaitGrace(
+                            executor, shutdownGraceSeconds, ShutdownCoordinator::requestShutdown);
+                } catch (InterruptedException interrupted) {
+                    terminationConfirmed = WorkerTermination.awaitGraceAfterInterrupt(
+                            executor, shutdownGraceSeconds, ShutdownCoordinator::requestShutdown);
+                    throw new RunTerminationException(
+                            RunTerminationException.Reason.INTERRUPTED,
+                            "Verification interrupted while stopping failed workers.",
+                            terminationConfirmed,
+                            interrupted);
+                }
+            }
+            if (!terminationConfirmed) {
+                throw new RunTerminationException(
+                        RunTerminationException.Reason.FAILED,
+                        "Verification failed; worker termination is not confirmed.",
+                        false,
+                        e);
+            }
+            throw e;
         } finally {
-            try {
-                if (progressExecutor != null) progressExecutor.shutdownNow();
-            } catch (Exception ignore) {
+            if (monitorThread != null) {
+                monitorThread.interrupt();
             }
             try {
                 if (executor != null) executor.shutdown();
             } catch (Exception ignore) {
             }
-            try {
-                if (verificationLogger != null) verificationLogger.close();
-            } catch (Exception ignore) {
-            }
-            try {
-                if (pool != null) pool.close();
-            } catch (Exception ignore) {
+            if (terminationConfirmed) {
+                try {
+                    if (verificationLogger != null) verificationLogger.close();
+                } catch (Exception ignore) {
+                }
+                try {
+                    if (pool != null) pool.close();
+                } catch (Exception ignore) {
+                }
+            } else {
+                logger.warn("Verifier workers may still be active; leaving CM pool and verification logger open.");
             }
         }
-    }
-
-    /**
-     * v1.26: Shutdown hook for clean resource disposal on SIGTERM/INT
-     */
-    private static void setupShutdownHook(final ExecutorService executor, final CMConnectionPool pool, final VerificationLogger vLogger) {
-        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            logger.info("Shutdown signal received (Verifier). Cleaning up...");
-            if (executor != null) {
-                executor.shutdown();
-            }
-            if (vLogger != null) vLogger.close();
-            if (pool != null) pool.close();
-        }, "verifier-shutdown-hook"));
     }
 
     private static JournalSchema detectJournalSchema(Connection conn) {

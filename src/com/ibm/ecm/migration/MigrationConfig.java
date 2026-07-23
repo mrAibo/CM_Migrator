@@ -218,6 +218,29 @@ public class MigrationConfig {
         return v == null ? def : Boolean.parseBoolean(v);
     }
 
+    private boolean propEnabled(String key, boolean def) {
+        String v = prop(key, null);
+        if (v == null) {
+            String normalizedKey = key.replace("_", "").toUpperCase();
+            for (String candidate : properties.stringPropertyNames()) {
+                if (candidate.replace("_", "").toUpperCase().equals(normalizedKey)) {
+                    v = properties.getProperty(candidate);
+                    break;
+                }
+            }
+        }
+        if (v == null) return def;
+        switch (v.trim().toLowerCase()) {
+            case "true":
+            case "yes":
+            case "1":
+            case "on":
+                return true;
+            default:
+                return false;
+        }
+    }
+
     // ========================================================================
     // Passwort Ent- und Verschlüsselung (Legacy-kompatibel)
     // ========================================================================
@@ -392,6 +415,16 @@ public class MigrationConfig {
         return propInt("POOL_MAX_WAIT_TIME", 10000, 100, 300000);
     }
 
+    /** Maximum regular worker runtime before graceful shutdown is requested. */
+    public int getWorkerTimeoutSeconds() {
+        return propInt("WORKER_TIMEOUT_SECONDS", 86_400, 1, 604_800);
+    }
+
+    /** Bounded grace period after timeout, interrupt, or terminal failure. */
+    public int getShutdownGraceSeconds() {
+        return propInt("SHUTDOWN_GRACE_SECONDS", 60, 1, 3_600);
+    }
+
     // ========================================================================
     // Journal / eMail
     // ========================================================================
@@ -444,7 +477,7 @@ public class MigrationConfig {
      * ACHTUNG: Destruktive Operation! Standard: false
      */
     public boolean isCascadeDeleteOnMissing() {
-        return propBool("CASCADE_DELETE_ON_MISSING", false);
+        return propEnabled("CASCADE_DELETE_ON_MISSING", false);
     }
 
     /**

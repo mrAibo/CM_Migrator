@@ -161,7 +161,7 @@ Getrackte Projektbereiche sind `src/`, `bin/`, `conf/`, `lib/`, `tests/`, `webap
 ```bash
 git clone https://github.com/mrAibo/CM_Migrator.git
 cd CM_Migrator
-git checkout hardening/integration-readiness
+git checkout hardening/security-baseline
 git status --short
 ```
 

@@ -31,6 +31,9 @@ SOURCE_POOL_SIZE=6
 DEST_POOL_SIZE=5
 POOL_BORROW_TIMEOUT=5000
 POOL_MAX_WAIT_TIME=10000
+# Regular worker wait and bounded graceful stop; values are seconds.
+WORKER_TIMEOUT_SECONDS=86400
+SHUTDOWN_GRACE_SECONDS=60
 
 # Journal and logging
 DB_PATH=./data/migration_journal

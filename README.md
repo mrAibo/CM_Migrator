@@ -2,7 +2,7 @@
 
 CM Migrator ist ein Java-Werkzeug für die Migration und Verifikation von Dokumenten zwischen IBM-Content-Manager-8.7-Systemen. Der aktuelle Stand unterstützt parallele Verarbeitung, H2-basierte Journale zur Wiederaufnahme, HTML-/CSV-Berichte, eine WebGUI und laufende Statusausgaben.
 
-Der Branch `hardening/integration-readiness` baut auf `hardening/security-baseline` auf und ergänzt die lokal lösbaren Readiness-Härtungen: bereinigtes Config-/Runtime-Tracking, fail-closed WebGUI-Auth, einen einbettbaren WebGUI-Delete-Pfad, entfernte einmalige Worker-Patch-Hilfen sowie dependency-freie GitHub-CI. IBM-CM-Live-E2E, Credential-Rotation, Git-History-Purge, produktive Performance-/JNI-Abnahme und die Entscheidung zur 24h-/unbegrenzten-Warte-Policy bleiben offen.
+Der in PR #1 gebündelte gehärtete Stand liegt bis zur Freigabe auf `hardening/security-baseline`; die Integration-Readiness-Änderungen aus PR #6 sind dort integriert. IBM-CM-Live-E2E, Credential-Rotation, Git-History-Purge, produktive Performance-/JNI-Abnahme, die Timeout-Policy und die im aktuellen Abschlussaudit dokumentierten lokalen Safety-/Hygiene-Blocker bleiben offen.
 
 Für Installation, Betrieb, Konfigurationsreferenz, Fehlerbehebung und Wiederanlauf siehe das [Betriebshandbuch](BETRIEBSHANDBUCH.md).
 
@@ -111,7 +111,7 @@ Ein `docs/`-Verzeichnis ist im aktuellen Branch nicht vorhanden. Projektdokument
 ```bash
 git clone https://github.com/mrAibo/CM_Migrator.git
 cd CM_Migrator
-git checkout hardening/integration-readiness
+git checkout hardening/security-baseline
 
 cp conf/migration.properties.example conf/migration.properties
 cp conf/webgui.properties.example conf/webgui.properties

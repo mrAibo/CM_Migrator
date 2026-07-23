@@ -435,13 +435,10 @@ public class WebServer {
             String path = exchange.getRequestURI().getPath();
 
             if ("POST".equals(method) && path.equals("/api/operation/start")) {
-                if (migrationRunning.get()) {
-                    ProcessState active = currentProcess.get();
-                    String activeUrl = active == null ? "" : active.processUrl;
-                    sendJson(exchange, 409, "{\"error\":\"Operation already running\",\"processUrl\":\""
-                            + escapeJson(activeUrl) + "\"}");
-                    return;
-                }
+                ProcessState state = null;
+                Thread thread = null;
+                boolean slotReserved = false;
+                boolean threadStarted = false;
 
                 try {
                     String body = readRequestBody(exchange);
@@ -477,13 +474,22 @@ public class WebServer {
                         return;
                     }
 
+                    if (!WebGuiRunSlot.reserve(migrationRunning)) {
+                        ProcessState active = currentProcess.get();
+                        String activeUrl = active == null ? "" : active.processUrl;
+                        sendJson(exchange, 409, "{\"error\":\"Operation already running\",\"processUrl\":\""
+                                + escapeJson(activeUrl) + "\"}");
+                        return;
+                    }
+                    slotReserved = true;
+
                     String runId = makeRunId(mode, profile, configPath);
                     String host = requestHost(exchange);
                     int monitorPort = Integer.getInteger("cm.migrator.monitor.port", 8000);
                     String monitorHost = primaryIpOrHost();
                     String monitorBase = "http://" + monitorHost + ":" + monitorPort;
 
-                    ProcessState state = new ProcessState(
+                    ProcessState newState = new ProcessState(
                             runId,
                             mode,
                             profile == null || profile.isEmpty() ? stripPropertiesSuffix(configPath.getFileName().toString()) : profile,
@@ -491,25 +497,36 @@ public class WebServer {
                             monitorBase + "/status.html",
                             monitorBase + "/migration_report.html",
                             monitorBase + "/verification_report.html");
+                    state = newState;
 
-                    processRegistry.put(runId, state);
-                    currentProcess.set(state);
+                    processRegistry.put(runId, newState);
+                    currentProcess.set(newState);
 
-                    Thread thread = new Thread(() -> runOperation(state, configPath, mode), "webgui-run-" + runId);
-                    state.thread = thread;
-                    migrationThread.set(thread);
-                    thread.start();
+                    Thread newThread = new Thread(() -> runOperation(newState, configPath, mode), "webgui-run-" + runId);
+                    thread = newThread;
+                    newState.thread = newThread;
+                    migrationThread.set(newThread);
+                    newThread.start();
+                    threadStarted = true;
 
-                    String processAbsoluteUrl = "http://" + host + state.processUrl;
+                    String processAbsoluteUrl = "http://" + host + newState.processUrl;
                     sendJson(exchange, 202,
                             "{\"success\":true"
                                     + ",\"runId\":\"" + escapeJson(runId) + "\""
-                                    + ",\"processUrl\":\"" + escapeJson(state.processUrl) + "\""
+                                    + ",\"processUrl\":\"" + escapeJson(newState.processUrl) + "\""
                                     + ",\"processAbsoluteUrl\":\"" + escapeJson(processAbsoluteUrl) + "\""
-                                    + ",\"dashboardUrl\":\"" + escapeJson(state.dashboardUrl) + "\""
-                                    + ",\"migrationReportUrl\":\"" + escapeJson(state.migrationReportUrl) + "\""
-                                    + ",\"verificationReportUrl\":\"" + escapeJson(state.verificationReportUrl) + "\"}");
+                                    + ",\"dashboardUrl\":\"" + escapeJson(newState.dashboardUrl) + "\""
+                                    + ",\"migrationReportUrl\":\"" + escapeJson(newState.migrationReportUrl) + "\""
+                                    + ",\"verificationReportUrl\":\"" + escapeJson(newState.verificationReportUrl) + "\"}");
                 } catch (Exception e) {
+                    if (slotReserved && !threadStarted) {
+                        if (thread != null) migrationThread.compareAndSet(thread, null);
+                        if (state != null) {
+                            processRegistry.remove(state.runId, state);
+                            currentProcess.compareAndSet(state, null);
+                        }
+                        WebGuiRunSlot.rollbackBeforeThreadStart(migrationRunning);
+                    }
                     logger.error("Could not start operation", e);
                     sendError(exchange, 500, "Could not start operation: " + e.getMessage());
                 }
@@ -520,15 +537,18 @@ public class WebServer {
     }
 
     private void runOperation(ProcessState state, Path configPath, String requestedMode) {
-        ShutdownCoordinator.reset();
-        migrationRunning.set(true);
         state.status = "RUNNING";
         state.currentStep = "Starting";
         state.appendLog("Starting operation");
 
         Path runConfig = null;
+        boolean releaseRunSlot = true;
         try {
-            runConfig = createRunConfigSnapshot(configPath, requestedMode, state.runId);
+            runConfig = RunConfigSnapshot.create(
+                    configPath,
+                    requestedMode,
+                    state.runId,
+                    Paths.get("data", "webgui-runs"));
             String runConfigFile = runConfig.toString();
             String mode = requestedMode == null ? "migration" : requestedMode.toLowerCase();
 
@@ -546,12 +566,12 @@ public class WebServer {
 
                 state.currentStep = "Step 2/2: verification";
                 state.appendLog("SAFE workflow: verification started");
-                Verifier.main(new String[]{runConfigFile});
+                Verifier.run(runConfigFile);
                 state.appendLog("SAFE workflow: verification completed");
             } else if ("verify".equals(mode) || "verification".equals(mode)) {
                 state.currentStep = "Verification";
                 state.appendLog("Verification started");
-                Verifier.main(new String[]{runConfigFile});
+                Verifier.run(runConfigFile);
                 state.appendLog("Verification completed");
             } else if ("delete".equals(mode)) {
                 state.currentStep = "Delete";
@@ -567,19 +587,55 @@ public class WebServer {
 
             state.status = "COMPLETED";
             state.message = "Operation completed";
+        } catch (RunTerminationException e) {
+            state.status = e.getWebStatus();
+            state.message = webMessageFor(e.getReason());
+            state.appendLog(state.message);
+            releaseRunSlot = e.isTerminationConfirmed();
+            logger.error("WebGUI operation terminated: reason={}, terminationConfirmed={}",
+                    e.getReason(), e.isTerminationConfirmed(), e.getCause());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            state.status = "STOPPED";
-            state.message = e.getMessage();
-            state.appendLog("Operation stopped: " + e.getMessage());
+            state.status = "INTERRUPTED";
+            state.message = "Operation interrupted by operator request";
+            state.appendLog(state.message);
+            releaseRunSlot = false;
+            logger.error("WebGUI operation interrupted", e);
         } catch (Exception e) {
             state.status = "FAILED";
-            state.message = e.getMessage();
-            state.appendLog("Operation failed: " + e.getMessage());
+            state.message = "Operation failed; see server logs";
+            state.appendLog(state.message);
             logger.error("WebGUI operation failed", e);
         } finally {
+            try {
+                RunConfigSnapshot.cleanupIfSafe(runConfig, releaseRunSlot);
+            } catch (IOException cleanupError) {
+                logger.error("Could not remove terminal WebGUI run snapshot", cleanupError);
+                if ("COMPLETED".equals(state.status)) {
+                    state.status = "FAILED";
+                    state.message = "Operation completed but secure snapshot cleanup failed";
+                    state.appendLog(state.message);
+                }
+            }
             state.finishedAtMs = System.currentTimeMillis();
-            migrationRunning.set(false);
+            WebGuiRunSlot.releaseIfConfirmed(migrationRunning, releaseRunSlot);
+            if (!releaseRunSlot) {
+                logger.warn("WebGUI run slot remains blocked because worker termination is unconfirmed.");
+            }
+        }
+    }
+
+    private static String webMessageFor(RunTerminationException.Reason reason) {
+        switch (reason) {
+            case POLICY:
+                return "Operation refused by security policy";
+            case TIMEOUT:
+                return "Operation timed out";
+            case INTERRUPTED:
+                return "Operation interrupted by operator request";
+            case FAILED:
+            default:
+                return "Operation failed; see server logs";
         }
     }
 
@@ -983,35 +1039,11 @@ public class WebServer {
     }
 
     private Path createRunConfigSnapshot(Path sourceConfig, String mode, String runId) throws IOException {
-        Properties props = new Properties();
-        if (Files.exists(sourceConfig)) {
-            try (InputStream is = Files.newInputStream(sourceConfig)) {
-                props.load(is);
-            }
-        }
-
-        String normalized = mode == null ? "MIGRATE" : mode.trim().toUpperCase();
-        if ("MIGRATION".equals(normalized)) normalized = "MIGRATE";
-        if ("VERIFY".equals(normalized) || "VERIFICATION".equals(normalized)) {
-            // Verifier ignores OPERATION_MODE; keep it for traceability only.
-            props.setProperty("OPERATION_MODE", "VERIFY");
-        } else if ("DELETE".equals(normalized)) {
-            props.setProperty("OPERATION_MODE", "DELETE");
-        } else {
-            // SAFE and MIGRATE both need a migration config for the Main phase.
-            props.setProperty("OPERATION_MODE", "MIGRATE");
-        }
-
-        props.setProperty("WEBGUI_RUN_ID", runId);
-        props.setProperty("WEBGUI_SOURCE_CONFIG", sourceConfig.toString().replace('\\', '/'));
-
-        Path runDir = Paths.get("data", "webgui-runs");
-        Files.createDirectories(runDir);
-        Path runConfig = runDir.resolve(runId + ".properties");
-        try (OutputStream os = Files.newOutputStream(runConfig)) {
-            props.store(os, "CM Migrator WebGUI run snapshot");
-        }
-        return runConfig;
+        return RunConfigSnapshot.create(
+                sourceConfig,
+                mode,
+                runId,
+                Paths.get("data", "webgui-runs"));
     }
 
     private String processStateJson(ProcessState state, boolean includeLog) {
@@ -1021,7 +1053,6 @@ public class WebServer {
         json.append("\"runId\":\"").append(escapeJson(state.runId)).append("\",");
         json.append("\"mode\":\"").append(escapeJson(state.mode)).append("\",");
         json.append("\"profile\":\"").append(escapeJson(state.profile)).append("\",");
-        json.append("\"configFile\":\"").append(escapeJson(state.configFile)).append("\",");
         json.append("\"status\":\"").append(escapeJson(state.status)).append("\",");
         json.append("\"currentStep\":\"").append(escapeJson(state.currentStep)).append("\",");
         json.append("\"message\":\"").append(escapeJson(state.message)).append("\",");
@@ -1217,6 +1248,12 @@ public class WebServer {
         StringBuilder json = new StringBuilder("{");
         boolean first = true;
         for (String key : props.stringPropertyNames()) {
+            String upper = key.toUpperCase();
+            if (upper.contains("PASSWORD") || upper.contains("SECRET")
+                    || upper.contains("TOKEN") || upper.contains("CREDENTIAL")
+                    || upper.contains("_CRYPT") || key.equals("WEBGUI_SOURCE_CONFIG")) {
+                continue;
+            }
             if (!first) json.append(",");
             first = false;
             json.append("\"").append(escapeJson(key)).append("\":\"")

@@ -30,6 +30,11 @@ for name in tracked:
 if forbidden:
     raise SystemExit("FAIL: tracked local config/backup/credential artifacts: " + ", ".join(forbidden))
 
+scanned = {"data/source-snapshot-20230611.html", "data/source-snapshot-20240316.html", "data/source-snapshot-20250104.html"}
+still_tracked = scanned.intersection(tracked)
+if still_tracked:
+    raise SystemExit("FAIL: stale source-snapshots are still tracked: " + ", ".join(sorted(still_tracked)))
+
 required = {
     "conf/migration.properties.example",
     "conf/webgui.properties.example",
