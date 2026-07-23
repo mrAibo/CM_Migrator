@@ -21,6 +21,7 @@ Im aktuellen Code vorhanden sind:
 - zentrale Weiterleitung des ersten asynchronen Producer-/Discovery-Fehlers;
 - HTML-Protokolle, Top-Level-Reports und Non-OK-CSV-Exporte;
 - ein während des Laufs aktualisiertes `status.html`;
+- adaptives OperatorConsole-Dashboard mit Statusmodell und ANSI-In-Place-Rendering;
 - optionale, eingebettete WebGUI;
 - optionaler statischer HTTP-Monitor über `bin/monitor.sh`;
 - optionale E-Mail-Benachrichtigung über lokal installiertes `mutt` oder `mailx`;
@@ -203,11 +204,25 @@ bash tests/test-tracked-config-hygiene.sh
 bash tests/test-run-lifecycle.sh
 bash tests/test-verifier-runtime-safety.sh
 bash tests/test-webgui-run-snapshot-security.sh
+bash tests/test-console-dashboard.sh
 ```
 
 `.github/workflows/test.yml` führt Shell-Syntax, `git diff --check` und alle IBM-unabhängigen Tests mit Java 17 aus. Der Hosted Runner materialisiert `lib/` nicht. `test-verifier-source-lookup-decision.sh` und `bin/compile.sh` benötigen die lokalen IBM-/Third-Party-Libraries und bleiben daher ein lokales beziehungsweise privates Gate; CI täuscht dafür keinen grünen Build vor.
 
 Ein grüner lokaler Testlauf bestätigt die jeweils getesteten Shell-, Unit- oder Strukturpfade. Er ersetzt keinen IBM-CM-Live-E2E-Test.
+
+## Console-Dashboard
+
+Das OperatorConsole-Dashboard rendert während der Migration ein ANSI-In-Place-Dashboard (PRETTY) oder eine Logzeile pro Sekunde (PLAIN). Der Modus wird über die System-Property `cm.migrator.console.mode` gesteuert:
+
+- `pretty`: ANSI-Dashboard mit Fortschrittsbalken, Statuszeilen und Journal-Gesundheit (Standard bei interaktivem Terminal)
+- `plain`: eine Textzeile pro Sekunde, geeignet für `tee`/`pipe`/CI-Umgebungen
+- `auto`: automatische Erkennung (Standard)
+
+```bash
+# Plain mode für automatisierte Läufe:
+java -Dcm.migrator.console.mode=plain -jar bin/cm-migrator.jar conf/migration.properties
+```
 
 ## Build
 

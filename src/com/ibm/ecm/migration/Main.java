@@ -65,6 +65,10 @@ public class Main {
         MigrationConfig config = new MigrationConfig(configPath);
         OperationalPolicy.enforceCascadeDeleteDisabled(config);
 
+        // OperatorConsole: adaptive dashboard (kept separate from ProgressMonitor HTML)
+        OperatorConsole console = new OperatorConsole();
+        console.setRunState(OperatorConsole.RunState.RUNNING);
+
         // Round 13A: SDK-Capability-Probe + Fail-Fast für >2 GB-sichere Pfade.
         // Verhindert, dass eine 30M-Items-Migration nachts startet und dann
         // einzelne >2 GB-Items entweder mit 32-bit-Truncation korrumpieren
@@ -106,6 +110,37 @@ public class Main {
         Thread monitorThread = new Thread(monitor);
         monitorThread.start();
 
+        // ConsoleMonitor: renders OperatorConsole dashboard every 1s (separate from HTML)
+        Thread consoleMonitorThread = new Thread(() -> {
+            while (console.getRunState() == OperatorConsole.RunState.RUNNING
+                    || console.getRunState() == OperatorConsole.RunState.DRAINING_WORKERS) {
+                try {
+                    Thread.sleep(1000);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+                OperatorConsole.Snapshot snap = new OperatorConsole.Snapshot();
+                snap.elapsedMs = System.currentTimeMillis() - stats.getStartTime();
+                snap.totalItems = stats.getTotalItems();
+                snap.processed = stats.getProcessedItems();
+                snap.success = stats.getSuccessItems();
+                snap.failed = stats.getFailedItems();
+                snap.skipped = stats.getSkippedItems();
+                snap.journalQueueSize = journal.getJournalQueueSize();
+                snap.journalQueueCapacity = journal.getJournalQueueCapacity();
+                snap.persistedCount = journal.getPersistedCount();
+                snap.journalHealth = journal.getJournalHealth();
+                snap.journalError = journal.getJournalError();
+                snap.operationMode = config.getOperationMode();
+                snap.sourceSSID = config.getSourceSSID();
+                snap.destSSID = config.getDestSSID();
+                console.draw(snap);
+            }
+        }, "ConsoleMonitor");
+        consoleMonitorThread.setDaemon(true);
+        consoleMonitorThread.start();
+
         // 5. Connection Pool
         CMConnectionPool pool = new CMConnectionPool(config);
         pool.init();
@@ -115,7 +150,7 @@ public class Main {
         startResourceMonitor();
 
         // 6. Start Producer
-        Producer producer = new Producer(queue, config, journal, stats, workerFailureState);
+        Producer producer = new Producer(queue, config, journal, stats, workerFailureState, console);
         workerExecutor.submit(producer);
 
         // 7. Start Consumers
@@ -148,6 +183,7 @@ public class Main {
         }
 
         boolean workersTerminated = termination.terminated();
+        console.setRunState(OperatorConsole.RunState.DRAINING_WORKERS);
         if (termination.timedOut()) {
             terminalOutcome = new RunTerminationException(
                     RunTerminationException.Reason.TIMEOUT,
@@ -169,49 +205,29 @@ public class Main {
                     null);
         }
 
-        boolean journalClosed = false;
-
         if (!aborted && workersTerminated) {
-            // ponytail: journal MUST close before reports/email so writer
-            // failure is discovered before success output is generated.
-            try {
-                journal.close();
-                journalClosed = true;
-            } catch (Exception e) {
-                logger.error("Journal close failed — marking migration as aborted.", e);
-                aborted = true;
-                if (terminalOutcome == null) {
-                    terminalOutcome = new RunTerminationException(
-                            RunTerminationException.Reason.FAILED,
-                            "Journal persistence failure: " + e.getMessage(),
-                            true,
-                            e);
+            console.setRunState(OperatorConsole.RunState.GENERATING_REPORTS);
+            // Generate migration protocol reports if enabled
+            if (config.isGenerateAuditProtocol()) {
+                try {
+                    logger.info("Generating migration protocol reports...");
+                    var reportGenerator = new ProtocolReportGenerator(config);
+                    reportGenerator.generateAllMigrationReports();
+                    logger.info("Migration protocol reports generated in reports/");
+                } catch (Exception e) {
+                    logger.error("Failed to generate protocol reports: {}", e.getMessage(), e);
                 }
             }
 
-            if (!aborted && workersTerminated) {
-                // Generate migration protocol reports if enabled
-                if (config.isGenerateAuditProtocol()) {
-                    try {
-                        logger.info("Generating migration protocol reports...");
-                        var reportGenerator = new ProtocolReportGenerator(config);
-                        reportGenerator.generateAllMigrationReports();
-                        logger.info("Migration protocol reports generated in reports/");
-                    } catch (Exception e) {
-                        logger.error("Failed to generate protocol reports: {}", e.getMessage(), e);
-                    }
+            // Legacy report and Email notification
+            try {
+                ReportGenerator.generateMigrationReport(config, stats, config.getOperationMode());
+                if (config.getEmailTo() != null && !config.getEmailTo().isEmpty()) {
+                    logger.info("Sending migration status email to: {}", config.getEmailTo());
+                    EmailNotifier.sendReport(config, "migration_report.html", config.getOperationMode(), stats);
                 }
-
-                // Legacy report and Email notification
-                try {
-                    ReportGenerator.generateMigrationReport(config, stats, config.getOperationMode());
-                    if (config.getEmailTo() != null && !config.getEmailTo().isEmpty()) {
-                        logger.info("Sending migration status email to: {}", config.getEmailTo());
-                        EmailNotifier.sendReport(config, "migration_report.html", config.getOperationMode(), stats);
-                    }
-                } catch (Exception e) {
-                    logger.error("Failed to generate legacy report or send email: {}", e.getMessage());
-                }
+            } catch (Exception e) {
+                logger.error("Failed to generate legacy report or send email: {}", e.getMessage());
             }
         } else {
             logger.warn("Migration did not complete normally. Skipping final reports and email notification.");
@@ -219,11 +235,9 @@ public class Main {
 
         if (workersTerminated) {
             // Only disconnect resources after every worker has definitely stopped.
-            // ponytail: journal already closed above; guard against double-close.
-            if (!journalClosed) {
-                try { journal.close(); } catch (Exception ignored) {}
-            }
+            console.setRunState(OperatorConsole.RunState.DRAINING_JOURNAL);
             pool.close();
+            journal.close();
             monitorThread.interrupt();
             try {
                 monitorThread.join(5000);
@@ -239,6 +253,41 @@ public class Main {
             }
         } else {
             logger.warn("Workers may still be active; leaving CM pool, journal, and monitor open.");
+        }
+
+        // Final dashboard render with terminal state
+        OperatorConsole.RunState finalState;
+        if (terminalOutcome != null) {
+            finalState = (terminalOutcome.getReason() == RunTerminationException.Reason.INTERRUPTED)
+                    ? OperatorConsole.RunState.INTERRUPTED : OperatorConsole.RunState.FAILED;
+        } else if (aborted) {
+            finalState = OperatorConsole.RunState.FAILED;
+        } else {
+            finalState = OperatorConsole.RunState.COMPLETED;
+        }
+        console.setRunState(finalState);
+        OperatorConsole.Snapshot finalSnap = new OperatorConsole.Snapshot();
+        finalSnap.elapsedMs = System.currentTimeMillis() - stats.getStartTime();
+        finalSnap.totalItems = stats.getTotalItems();
+        finalSnap.processed = stats.getProcessedItems();
+        finalSnap.success = stats.getSuccessItems();
+        finalSnap.failed = stats.getFailedItems();
+        finalSnap.skipped = stats.getSkippedItems();
+        finalSnap.journalQueueSize = journal.getJournalQueueSize();
+        finalSnap.journalQueueCapacity = journal.getJournalQueueCapacity();
+        finalSnap.persistedCount = journal.getPersistedCount();
+        finalSnap.journalHealth = journal.getJournalHealth();
+        finalSnap.journalError = journal.getJournalError();
+        finalSnap.operationMode = config.getOperationMode();
+        finalSnap.sourceSSID = config.getSourceSSID();
+        finalSnap.destSSID = config.getDestSSID();
+        finalSnap.runState = finalState;
+        console.finalRender(finalSnap);
+
+        // Stop console monitor
+        consoleMonitorThread.interrupt();
+        try { consoleMonitorThread.join(1000); } catch (InterruptedException ignored) {
+            Thread.currentThread().interrupt();
         }
 
         System.out.println("\n" + ConsoleUI.separator());
