@@ -62,6 +62,18 @@ public class ProtocolReportGenerator {
         this.config = config;
         this.dbBaseDir = dbBaseDir;
     }
+
+    /**
+     * @deprecated Replaced by the unified {@link ReportDeliveryService} pipeline.
+     *             Kept for backward compatibility with external callers.
+     */
+    @Deprecated
+    public static void generateUnifiedReport(MigrationConfig config, MigrationStats stats) {
+        logger.warn("ProtocolReportGenerator.generateUnifiedReport() is deprecated — use ReportDeliveryService.deliver() directly.");
+        ReportDataCollector collector = new ReportDataCollector(stats, config);
+        UnifiedReport report = collector.collect();
+        ReportDeliveryService.deliver(report, config);
+    }
     
     /**
      * Holt eine DB-Verbindung für einen spezifischen ItemType.

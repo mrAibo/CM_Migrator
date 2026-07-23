@@ -217,14 +217,24 @@ public class Main {
                         logger.error("Failed to generate protocol reports: {}", e.getMessage(), e);
                     }
                 }
+                // ── Unified report pipeline (v2.2.1) ──
                 try {
-                    ReportGenerator.generateMigrationReport(config, stats, config.getOperationMode());
-                    if (config.getEmailTo() != null && !config.getEmailTo().isEmpty()) {
-                        logger.info("Sending migration status email to: {}", config.getEmailTo());
-                        EmailNotifier.sendReport(config, "migration_report.html", config.getOperationMode(), stats);
+                    boolean reportEnabled = !"false".equalsIgnoreCase(
+                            config.getProperty("REPORT_ENABLED", "true"));
+                    if (reportEnabled) {
+                        ReportDataCollector collector = new ReportDataCollector(stats, config);
+                        UnifiedReport report = collector.collect();
+                        DeliveryResult result = ReportDeliveryService.deliver(report, config);
+                        logger.info("Report delivered: path={}, sent={}, transport={}",
+                                result.reportPath, result.sent, result.transport);
+                        if (result.errorMessage != null) {
+                            logger.error("Report delivery issue: {}", result.errorMessage);
+                        }
+                    } else {
+                        logger.info("REPORT_ENABLED=false — skipping unified report generation.");
                     }
                 } catch (Exception e) {
-                    logger.error("Failed to generate report or send email: {}", e.getMessage());
+                    logger.error("Failed to generate report or send email: {}", e.getMessage(), e);
                 }
             }
         } else {

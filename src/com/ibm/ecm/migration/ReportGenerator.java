@@ -146,7 +146,13 @@ public class ReportGenerator {
         "    });" +
         "});";
 
+    /**
+     * @deprecated Replaced by {@link ReportDeliveryService} unified pipeline.
+     *             Kept for backward compatibility.
+     */
+    @Deprecated
     public static void generateMigrationReport(MigrationConfig config, MigrationStats stats, String operationMode) {
+        logger.warn("ReportGenerator.generateMigrationReport() is deprecated — use the unified report pipeline instead.");
         String fileName = operationMode.equals("DELETE") ? "deletion_report.html" : "migration_report.html";
         
         if (stats == null) {

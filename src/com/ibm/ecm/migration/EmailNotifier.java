@@ -407,8 +407,14 @@ public class EmailNotifier {
                    .replace("'", "&#39;");
     }
 
+    /**
+     * @deprecated Replaced by {@link ReportDeliveryService} unified pipeline.
+     *             Kept for backward compatibility — delegates to new pipeline.
+     */
+    @Deprecated
     public static void sendReport(MigrationConfig config, String reportPath, 
                                    String operationMode, MigrationStats stats) {
+        logger.warn("EmailNotifier.sendReport() is deprecated — use ReportDeliveryService.deliver() instead.");
         if (stats == null) {
             logger.warn("E-Mail kann nicht gesendet werden: MigrationStats ist null");
             return;
