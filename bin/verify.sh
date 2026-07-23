@@ -64,6 +64,13 @@ if [ ! -f "$CONFIG_FILE" ]; then
     exit 1
 fi
 
+# Operational containment: Java already returns explicit EXISTS / NOT_FOUND /
+# ERROR states, but every enabled cascade delete remains blocked until IBM live
+# acceptance and explicit operational approval.
+# shellcheck source=bin/cascade-delete-guard.sh
+source "bin/cascade-delete-guard.sh"
+assert_cascade_delete_disabled "$CONFIG_FILE"
+
 echo "Starting Verifier with config: $CONFIG_FILE"
 echo "Classpath: $CP"
 

@@ -1,186 +1,68 @@
-# #############################################################################
-# IBM Content Manager v8.7 Migrator - Elite Performance Config (v2.1.31)
-# #############################################################################
+# CM Migrator configuration template
+# Copy to conf/migration.properties, keep it untracked, set chmod 600, and
+# replace every required blank field before use. Never commit credentials.
 
-# -----------------------------------------------------------------------------
-# 1. DIAMOND PROFILE ENGINE (v1.28) - NEU!
-# -----------------------------------------------------------------------------
-# Wählen Sie ein Performance-Profil, um automatisch die optimalen Smart-Defaults
-# für Threads, Batches, Queue-Sizes und H2-Tuning zu setzen.
-#
-# Mögliche Werte:
-# PROFILE=KLEIN   | (<10M Items)  5 Threads, 50 Batch, 1k Queue
-# PROFILE=MITTEL  | (10-100M Items) 20 Threads, 200 Batch, 5k Queue
-# PROFILE=GROSS   | (100-500M Items) 50 Threads, 500 Batch, 10k Queue
-# PROFILE=EXTREM  | (500M+ Items) 100 Threads, 1000 Batch, 20k Queue, Tuned H2
-# PROFILE=ULTI    | (>500M Items) 200 Threads, 2000 Batch, 50k Queue, Ultra H2
-#
-# HINWEIS: Jeder Parameter kann unten manuell überschrieben werden!
-PROFILE=MITTEL
+# Connection profile and endpoints
+PROFILE=KLEIN
+SOURCE_SSID=
+DEST_SSID=
+SOURCE_USER=
+SOURCE_PASSWORD_CRYPT=
+DEST_USER=
+DEST_PASSWORD_CRYPT=
+# Optional shared fallback instead of separate source/destination credentials:
+CONNECT_USER=
+CONNECT_PASSWORD_CRYPT=
 
-# -----------------------------------------------------------------------------
-# 2. Verbindungsdaten & Authentifizierung (IBM CM)
-# -----------------------------------------------------------------------------
-
-# Quell-System (Source) SSID (Library Server Name)
-SOURCE_SSID=SOURCE_DB
-
-# Ziel-System (Destination) SSID
-DEST_SSID=TARGET_DB
-
-# --- Authentifizierung (Shared / Gemeinsam) ---
-# Wenn Quelle und Ziel denselben User nutzen, tragen Sie ihn hier ein.
-CONNECT_USER=admin
-
-# Passwort für den Benutzer.
-# ACHTUNG: Verwenden Sie ENTWEDER CONNECT_PASSWORD (Klartext) ODER CONNECT_PASSWORD_CRYPT (Verschlüsselt).
-# Klartext-Passwort (nur für Tests empfohlen):
-# CONNECT_PASSWORD=password123
-
-# Verschlüsseltes Passwort (empfohlen für Produktion).
-# Verschlüsselung erfolgt via Base64 -> Reverse -> Base64 (Legacy-Methode aus icmbatch).
-# Beispiel: Um "password" zu verschlüsseln, nutzen Sie das Migrator-Tool oder die interne Logik.
-CONNECT_PASSWORD_CRYPT=IHR_VERSCHLUESSES_PASSWORT
-
-# --- Authentifizierung (Separate User) ---
-# Falls Quelle und Ziel unterschiedliche User benötigen, aktivieren Sie diese:
-# SOURCE_USER=source_api_user
-# SOURCE_PASSWORD_CRYPT=...
-# DEST_USER=target_admin
-# DEST_PASSWORD_CRYPT=...
-
-# -----------------------------------------------------------------------------
-# 3. Migrations-Umfang (Scope)
-# -----------------------------------------------------------------------------
-
-# Liste der zu migrierenden ItemTypes.
-# Format: SourceItemType:DestItemType, SourceItemType2:DestItemType2
-# Wenn Source und Dest gleich heißen, reicht der Name einmal.
-# Wenn leer, versucht das Tool ALLE ItemTypes zu migrieren (Vorsicht!).
-# Beispiel: MHBPDM_DOC_05:FFEPDM_DOC_99, Rechnungen, Vertraege
-MIGRATE_ITEMTYPES=MHBPDM_DOC_05:FFEPDM_DOC_99
-
-# Modus: MIGRATE (Verschieben/Kopieren) oder DELETE (Löschen auf Quelle basierend auf Journal)
+# Operation. Supported values: MIGRATE, DELETE
 OPERATION_MODE=MIGRATE
-
-# Filter-Prädikat (WQL WHERE-Klausel)
-# Beispiel: @VERSIONID = 1 AND @LASTCHANGED > '2023-01-01-00.00.00'
+# Comma-separated SOURCE_TYPE:DEST_TYPE mappings. Configure explicitly.
+MIGRATE_ITEMTYPES=
 FILTER_PREDICATE=
+DRY_RUN=false
 
-# -----------------------------------------------------------------------------
-# 4. Performance Overrides (Optional - Überschreibt Profil-Defaults)
-# -----------------------------------------------------------------------------
+# Concurrency and queueing
+THREAD_COUNT=5
+BATCH_SIZE=100
+QUEUE_SIZE=10000
+PRODUCER_COUNT_STRATEGY=HYBRID
+CONSUMER_DOUBLECHECK=false
+SOURCE_POOL_SIZE=6
+DEST_POOL_SIZE=5
+POOL_BORROW_TIMEOUT=5000
+POOL_MAX_WAIT_TIME=10000
+# Regular worker wait and bounded graceful stop; values are seconds.
+WORKER_TIMEOUT_SECONDS=86400
+SHUTDOWN_GRACE_SECONDS=60
 
-# THREAD_COUNT=25
-# BATCH_SIZE=100
-# QUEUE_SIZE=10000
-# STREAM_UPLOAD=true
-
-# -----------------------------------------------------------------------------
-# 5. Connection Pool & Timeouts (v1.28 Elite)
-# -----------------------------------------------------------------------------
-
-# POOL_BORROW_TIMEOUT: Max. Wartezeit (ms) auf eine freie Connection aus dem Pool.
-# Bei Zeitüberschreitung wird eine Notfall-Verbindung erstellt.
-POOL_BORROW_TIMEOUT=5000      # 5 Sekunden Max-Wartezeit (Standard: 5 Sekunden)
-
-# POOL_MAX_WAIT_TIME: Max. Zeit (ms) für den Retry-Versuch bei leeren Pools.
-POOL_MAX_WAIT_TIME=10000       # 10 Sekunden Max-Gesamtwartezeit
-
-# Erläuterung:
-# - Wenn Wartezeiten diese Limits überschreiten, reduzieren Sie ggf. den THREAD_COUNT.
-
-# -----------------------------------------------------------------------------
-# 6. Enterprise Logging (Sparse Logging v1.28)
-# -----------------------------------------------------------------------------
-
-# LOG_ITEMS_BATCHED=true        # Batch-Logging aktivieren (weniger Disk-I/O)
-# LOG_BATCH_INTERVAL=10000      # Jede 10.000 Items ein Progress-Eintrag
-# LOG_ERRORS_IMMEDIATE=true     # Fehler/Warnings sofort loggen (trotz Batch-Modus)
-
-# -----------------------------------------------------------------------------
-# 7. H2 Database Tuning (v1.27/v1.28)
-# -----------------------------------------------------------------------------
-# HINWEIS: Bei Profilen EXTREM/ULTI bereits vorkonfiguriert!
-# Diese Parameter optimieren die Journal-Performance massiv (Diamond Grade).
-
-DB_URL_APPEND=;CACHE_SIZE=65536;LOCK_MODE=0;LOG=0;MAX_OPERATION_MEMORY=256000000;COMPRESS_LOB=0
-
-# Erläuterung:
-# CACHE_SIZE=65536              = 64MB Cache pro Connection (schnellere Lookups)
-# LOCK_MODE=0                   = Kein File-Locking (schnellste Writes, exklusiver Zugriff)
-# LOG=0                         = Disable WAL/Transaction-Log (schnellste Writes)
-# MAX_OPERATION_MEMORY=256000000 = 256MB Memory-Limit pro DB-Operation
-# COMPRESS_LOB=0                = Keine Kompression (schneller für LOB-Metadaten)
-
-# -----------------------------------------------------------------------------
-# 8. Journal & Audit (v1.25+)
-# -----------------------------------------------------------------------------
-
-# Lokaler Pfad für H2-Journal Datenbanken (ohne .mv.db Dateiendung)
+# Journal and logging
 DB_PATH=./data/migration_journal
+DATA_DIR=./data
+DB_URL_APPEND=
+LOG_ITEMS_BATCHED=false
+LOG_BATCH_INTERVAL=10000
+LOG_ERRORS_IMMEDIATE=true
 
-# Audit-Protokoll Generierung (HTML Berichte pro ItemType)
+# Content transfer
+STREAM_UPLOAD=false
+
+# Reports and notifications
 GENERATE_AUDIT_PROTOCOL=true
 AUDIT_PROTOCOL_OUTPUT_DIR=./reports
-
-# CASCADE_DELETE_ON_MISSING: Löscht Items im Ziel, die in der Quelle nicht mehr existieren.
-# ACHTUNG: Destruktive Operation (DANGER)!
-CASCADE_DELETE_ON_MISSING=false
-
-# -----------------------------------------------------------------------------
-# 9. Auto-Remigration (v2.1.31 NEU!)
-# -----------------------------------------------------------------------------
-# Wenn aktiviert, markiert der Verifier bei MISMATCH automatisch Items zur Re-Migration.
-# Das vereinfacht den Workflow: Nach verify.sh kann direkt start.sh aufgerufen werden.
-# Die fehlgeschlagenen Items werden automatisch erneut migriert.
-#
-# Workflow (vereinfacht):
-#   1. ./bin/start.sh      (Migration)
-#   2. ./bin/verify.sh     (Verifikation + automatische Markierung bei Fehlern)
-#   3. ./bin/start.sh      (Re-Migration der fehlgeschlagenen Items)
-#
-# Deaktivieren Sie dies nur, wenn Sie das alte remigrate.sh manuell nutzen möchten.
+PROTOCOL_OUTPUT_DIR=./reports
+PROTOCOL_COMPANY_NAME=
+PROTOCOL_COMPANY_LOGO=
+EMAIL_TO=
 AUTO_MARK_FOR_REMIGRATION=true
 
-# -----------------------------------------------------------------------------
-# 10. JVM-TUNING FÜR 500M+ DOKUMENTE (v1.28)
-# -----------------------------------------------------------------------------
-# HINWEIS: Diese Werte dienen als Vorgabe für die Variable JVM_OPTS in start.sh.
+# Destructive verification remains blocked by the launcher guard until explicit
+# IBM live approval, even though Java now distinguishes EXISTS/NOT_FOUND/ERROR.
+CASCADE_DELETE_ON_MISSING=false
 
-# Speicher-Allokation (Beispiel für Server mit 64GB+ RAM)
-# JVM_OPTS=-Xmx32g -XX:MaxHeapFreeRatio=75 -XX:+UseG1GC -XX:+UseStringDeduplication -XX:+OptimizeStringConcat
-
-# Erläuterung:
-# -Xmx32g                     = 32GB Maximaler Heap-Speicher
-# -XX:MaxHeapFreeRatio=75      = Garbage Collection Triggern bei 75% freiem Speicher
-# -XX:+UseG1GC                 = G1 Garbage Collector (modern, parallel)
-# -XX:+UseStringDeduplication   = Optimiert String-Pool (spart massiv RAM bei Metadaten)
-# -XX:+OptimizeStringConcat     = Beschleunigt String-Verarbeitung
-# -XX:ParallelGCThreads=8       = 8 GC-Threads (Einstellung je nach CPU-Kernen)
-# -XX:+DisableExplicitGC        = Verhindert manuelle System.gc() Aufrufe (Performance-Killer)
-
-# -----------------------------------------------------------------------------
-# 11. WebGUI Authentifizierung (v2.3.0 NEU!)
-# -----------------------------------------------------------------------------
-# Schützt das WebGUI-Dashboard vor unbefugtem Zugriff.
-# Nur der /api/status und /api/health Endpunkt bleiben öffentlich für Monitoring.
-
-# Auth aktivieren/deaktivieren (Standard: true)
+# WebGUI authentication fallback. conf/webgui.properties takes precedence.
+# With authentication enabled, startup fails unless a non-empty admin user and
+# either WEBGUI_ADMIN_PASSWORD or a valid SHA-256 hash are configured.
 webgui.auth.enabled=true
-
-# Admin-Benutzername für WebGUI
 webgui.admin.user=admin
-
-# Admin-Passwort (Klartext - nur für Tests)
-# webgui.admin.password=AdminPasswort123
-
-# Admin-Passwort als SHA-256 Hash (empfohlen für Produktion)
-# Generieren mit: java AuthHandler MeinPasswort
-# webgui.admin.password.hash=5e884898da28047d9166e4ef91dc3cdd...
-
-# Alternativ: Umgebungsvariablen verwenden (überschreibt Properties)
-# export WEBGUI_ADMIN_USER=admin
-# export WEBGUI_ADMIN_PASSWORD=MeinSicheresPasswort
-
-# Rate-Limiting: Nach 5 Fehlversuchen wird die IP für 5 Minuten gesperrt.
+# webgui.admin.password.hash=
+WEBGUI_ALLOW_PASSWORDLESS_CM_LOGIN=false

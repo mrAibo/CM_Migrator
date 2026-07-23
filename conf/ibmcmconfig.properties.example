@@ -1,0 +1,8 @@
+# Optional IBM Content Manager installation template
+# Copy to conf/ibmcmconfig.properties only when required by the approved SDK
+# setup, keep the resulting file untracked, and fill local values.
+
+IBMCMAdminGroup=
+IBMCMAdminUser=
+IBMCMWorkingDirectory=
+IBMCMLOGRELATIVEPATH=false

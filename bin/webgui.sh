@@ -3,14 +3,19 @@
 # CM Migrator v2.2 - WebGUI Starter
 # =============================================================================
 # Startet den eingebetteten HTTP-Server für das Web-Dashboard.
-# 
+#
 # Usage:
 #   ./bin/webgui.sh              # Standard: Port 8080
 #   ./bin/webgui.sh --port 9000  # Alternativer Port
 #
 # Environment:
-#   CM_JAVA_OPTS   additional JVM flags (e.g. -Dcm.migrator.webgui.bindAll=true)
+#   CM_JAVA_OPTS             additional JVM flags (e.g. -Dcm.migrator.webgui.bindAll=true)
+#   WEBGUI_ADMIN_USER        admin user fallback
+#   WEBGUI_ADMIN_PASSWORD    preferred plaintext password source; never logged
+# Authentication enabled without a user and password/valid hash fails closed.
 # =============================================================================
+
+set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
@@ -38,6 +43,16 @@ JAR_FILE="bin/cm-migrator.jar"
 if [ ! -f "$JAR_FILE" ]; then
     echo "[ERROR] $JAR_FILE not found! Run ./bin/compile.sh first."
     exit 1
+fi
+
+# Operational containment: Java tri-state lookup is implemented, but the
+# standard WebGUI configuration remains blocked from enabling cascade delete
+# until IBM live acceptance and explicit operational approval.
+DEFAULT_MIGRATION_CONFIG="conf/migration.properties"
+if [ -f "$DEFAULT_MIGRATION_CONFIG" ]; then
+    # shellcheck source=bin/cascade-delete-guard.sh
+    source "bin/cascade-delete-guard.sh"
+    assert_cascade_delete_disabled "$DEFAULT_MIGRATION_CONFIG"
 fi
 
 # Port aus Argumenten

@@ -30,15 +30,18 @@ public class Producer implements Runnable {
     private final MigrationConfig config;
     private final MigrationJournal journal;
     private final MigrationStats stats;
+    private final WorkerFailureState workerFailureState;
     private final int consumerCount;
 
     private static final Pattern VALID_ITEM_TYPE = Pattern.compile("[a-zA-Z0-9_]+");
 
-    public Producer(BlockingQueue<MigrationItem> queue, MigrationConfig config, MigrationJournal journal, MigrationStats stats) {
+    public Producer(BlockingQueue<MigrationItem> queue, MigrationConfig config, MigrationJournal journal,
+                    MigrationStats stats, WorkerFailureState workerFailureState) {
         this.queue = queue;
         this.config = config;
         this.journal = journal;
         this.stats = stats;
+        this.workerFailureState = workerFailureState;
         this.consumerCount = config.getThreadCount();
     }
 
@@ -62,8 +65,13 @@ public class Producer implements Runnable {
                 final String destType = entry.getValue();
 
                 if (!VALID_ITEM_TYPE.matcher(sourceType).matches() || !VALID_ITEM_TYPE.matcher(destType).matches()) {
-                    logger.error("SECURITY ALERT: Invalid ItemType format detected! Source={}, Dest={}. Skipping.", sourceType, destType);
-                    continue;
+                    IllegalArgumentException failure = new IllegalArgumentException(
+                            "Invalid ItemType format: " + sourceType + " -> " + destType);
+                    workerFailureState.record(failure);
+                    logger.error("SECURITY ALERT: Invalid ItemType format detected! Source={}, Dest={}. Aborting.",
+                            sourceType, destType, failure);
+                    ShutdownCoordinator.requestShutdown();
+                    break;
                 }
 
                 discoveryExecutor.submit(() -> {
@@ -79,7 +87,9 @@ public class Producer implements Runnable {
                         
                         processItemType(localConn, sourceType, destType);
                     } catch (Exception e) {
+                        workerFailureState.record(e);
                         logger.error("Error processing ItemType {}", sourceType, e);
+                        ShutdownCoordinator.requestShutdown();
                     } finally {
                         ThreadContext.clearAll();
                     }
@@ -95,24 +105,22 @@ public class Producer implements Runnable {
             }
             
             if (ShutdownCoordinator.isShuttingDown()) {
-                logger.warn("Shutdown requested. Waiting briefly for discovery executor to stop gracefully.");
-            
-                try {
-                    if (!discoveryExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
-                        logger.warn("Discovery executor did not stop within grace period. Leaving it to finish without shutdownNow().");
-                    }
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
+                logger.warn("Shutdown requested. Waiting for discovery executor to stop gracefully.");
+
+                while (!discoveryExecutor.awaitTermination(1, TimeUnit.SECONDS)) {
+                    // Keep in-flight IBM SDK calls alive until they return naturally.
                 }
             }
 
         } catch (InterruptedException e) {
+            workerFailureState.record(e);
             logger.error("Producer interrupted", e);
+            ShutdownCoordinator.requestShutdown();
             discoveryExecutor.shutdownNow();
             Thread.currentThread().interrupt();
         } finally {
-            if (ShutdownCoordinator.isShuttingDown()) {
-                logger.info("Producer stopping due to shutdown. Skipping Poison Pills; consumers stop via shutdown flag.");
+            if (ShutdownCoordinator.isShuttingDown() || workerFailureState.hasFailure()) {
+                logger.info("Producer stopping due to shutdown or failure. Skipping Poison Pills; consumers stop via shutdown flag.");
             } else {
                 logger.info("All ItemTypes processed. Enqueuing Poison Pills...");
                 enqueuePoisonPill();
@@ -169,9 +177,8 @@ public class Producer implements Runnable {
         logger.info("Poison Pills enqueued: {}/{}", sent, consumerCount);
     }
 
-    private void processItemType(CMConnection conn, String sourceType, String destType) {
-        try {
-            DKDatastoreICM ds = conn.getDatastore();
+    private void processItemType(CMConnection conn, String sourceType, String destType) throws Exception {
+        DKDatastoreICM ds = conn.getDatastore();
             logger.info("Processing ItemType: {} -> {}", sourceType, destType);
 
             int preloadedCount = journal.preloadCache(sourceType);
@@ -283,12 +290,8 @@ public class Producer implements Runnable {
             long duration = System.currentTimeMillis() - tStart;
             long avgFetch = fetched > 0 ? duration / fetched : 0;
 
-            logger.info("PRODUCER STATS Type={} Fetched={} Enqueued={} Skipped={} AvgFetchMs={} QueueDepth={}", 
-                    sourceType, fetched, enqueued, skipped, avgFetch, queue.size());
-
-        } catch (Exception e) {
-            logger.error("Error in Producer for type " + sourceType, e);
-        }
+        logger.info("PRODUCER STATS Type={} Fetched={} Enqueued={} Skipped={} AvgFetchMs={} QueueDepth={}",
+                sourceType, fetched, enqueued, skipped, avgFetch, queue.size());
     }
 
     private String buildQuery(String sourceType) {
