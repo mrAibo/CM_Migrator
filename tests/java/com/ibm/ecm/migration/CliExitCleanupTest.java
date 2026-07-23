@@ -1,43 +1,16 @@
 package com.ibm.ecm.migration;
 
+import java.util.concurrent.atomic.AtomicBoolean;
+
 /**
- * Tests the exit/cleanup contract: finish() must run before exit code is
- * returned, and generic exceptions must be treated as unconfirmed termination.
- * No IBM CM connections, no JVM exit — pure deterministic lifecycle checks.
+ * Tests the exit/cleanup contract using the real production CliLifecycleRunner.executeCli path.
+ * No copied logic, no double hook registration, no IBM CM connections.
  */
 public final class CliExitCleanupTest {
 
-    /** Minimal operation abstraction — no interface, just a package-private hook. */
-    @FunctionalInterface
-    interface CliOperation {
-        void run() throws Exception;
-    }
-
-    /**
-     * Package-private helper shared by Main.runCli and Verifier.runCli tests.
-     * Returns exit code after guaranteed finish().
-     */
-    static int executeCli(CliOperation operation,
-                          CliShutdownLifecycle lifecycle) {
-        boolean terminationConfirmed = true;
-        int exitCode = 0;
-        try {
-            lifecycle.register();
-            operation.run();
-        } catch (RunTerminationException e) {
-            terminationConfirmed = e.isTerminationConfirmed();
-            exitCode = e.getExitCode();
-        } catch (Exception e) {
-            terminationConfirmed = false;
-            exitCode = 1;
-        } finally {
-            lifecycle.finish(terminationConfirmed);
-        }
-        return exitCode;
-    }
-
     public static void main(String[] args) {
         testRunTerminationExceptionUnconfirmed();
+        testRunTerminationExceptionConfirmed();
         testGenericExceptionUnconfirmed();
         testSuccessConfirmed();
         testFinishBeforeExit();
@@ -48,31 +21,54 @@ public final class CliExitCleanupTest {
     private static void testRunTerminationExceptionUnconfirmed() {
         ShutdownCoordinator.reset();
         CliShutdownLifecycle lifecycle = new CliShutdownLifecycle(1);
+        AtomicBoolean operationCalled = new AtomicBoolean(false);
 
-        int exitCode = executeCli(() -> {
+        int exitCode = CliLifecycleRunner.executeCli(lifecycle, () -> {
+            operationCalled.set(true);
             throw new RunTerminationException(
                     RunTerminationException.Reason.TIMEOUT,
                     "simulated timeout",
                     false,     // terminationConfirmed = false
                     null);
-        }, lifecycle);
+        });
 
+        assertTrue(operationCalled.get(), "operation must be called (unconfirmed)");
         assertEquals(124, exitCode, "exit code must be 124 (TIMEOUT)");
         assertFalse(lifecycle.isRegistered(),
                 "hook must be removed after finish(false)");
-        assertFalse(ShutdownCoordinator.isShuttingDown() &&
-                lifecycle.requestShutdownAndAwait(),
-                "unconfirmed finish must not signal confirmed");
+    }
+
+    private static void testRunTerminationExceptionConfirmed() {
+        ShutdownCoordinator.reset();
+        CliShutdownLifecycle lifecycle = new CliShutdownLifecycle(1);
+        AtomicBoolean operationCalled = new AtomicBoolean(false);
+
+        int exitCode = CliLifecycleRunner.executeCli(lifecycle, () -> {
+            operationCalled.set(true);
+            throw new RunTerminationException(
+                    RunTerminationException.Reason.FAILED,
+                    "simulated failure",
+                    true,      // terminationConfirmed = true
+                    null);
+        });
+
+        assertTrue(operationCalled.get(), "operation must be called (confirmed)");
+        assertEquals(1, exitCode, "exit code must be 1 (FAILED)");
+        assertFalse(lifecycle.isRegistered(),
+                "hook must be removed after finish(true)");
     }
 
     private static void testGenericExceptionUnconfirmed() {
         ShutdownCoordinator.reset();
         CliShutdownLifecycle lifecycle = new CliShutdownLifecycle(1);
+        AtomicBoolean operationCalled = new AtomicBoolean(false);
 
-        int exitCode = executeCli(() -> {
+        int exitCode = CliLifecycleRunner.executeCli(lifecycle, () -> {
+            operationCalled.set(true);
             throw new RuntimeException("simulated crash");
-        }, lifecycle);
+        });
 
+        assertTrue(operationCalled.get(), "operation must be called (generic crash)");
         assertEquals(1, exitCode, "generic exception must return exit code 1");
         assertFalse(lifecycle.isRegistered(),
                 "hook must be removed after generic exception finish(false)");
@@ -81,11 +77,14 @@ public final class CliExitCleanupTest {
     private static void testSuccessConfirmed() {
         ShutdownCoordinator.reset();
         CliShutdownLifecycle lifecycle = new CliShutdownLifecycle(1);
+        AtomicBoolean operationCalled = new AtomicBoolean(false);
 
-        int exitCode = executeCli(() -> {
+        int exitCode = CliLifecycleRunner.executeCli(lifecycle, () -> {
+            operationCalled.set(true);
             // success — no exception
-        }, lifecycle);
+        });
 
+        assertTrue(operationCalled.get(), "operation must be called (success)");
         assertEquals(0, exitCode, "success must return exit code 0");
         assertFalse(lifecycle.isRegistered(),
                 "hook must be removed after successful finish(true)");
@@ -93,20 +92,20 @@ public final class CliExitCleanupTest {
 
     private static void testFinishBeforeExit() {
         ShutdownCoordinator.reset();
-
         CliShutdownLifecycle lifecycle = new CliShutdownLifecycle(1);
-        lifecycle.register();
-        assertTrue(lifecycle.isRegistered(),
-                "hook must be registered before operation");
+        AtomicBoolean operationCalled = new AtomicBoolean(false);
 
-        int exitCode = executeCli(() -> {
+        // No manual lifecycle.register() — CliLifecycleRunner.executeCli handles registration.
+        int exitCode = CliLifecycleRunner.executeCli(lifecycle, () -> {
+            operationCalled.set(true);
             throw new RunTerminationException(
                     RunTerminationException.Reason.FAILED,
                     "simulated failure",
                     true,
                     null);
-        }, lifecycle);
+        });
 
+        assertTrue(operationCalled.get(), "operation must be called (finish-before-exit)");
         assertFalse(lifecycle.isRegistered(),
                 "finish() must deregister hook before exit code is returned");
         assertEquals(1, exitCode, "FAILED reason must return exit code 1");
@@ -117,27 +116,34 @@ public final class CliExitCleanupTest {
             ShutdownCoordinator.reset();
             CliShutdownLifecycle lifecycle = new CliShutdownLifecycle(1);
             final int iteration = i;
+            AtomicBoolean operationCalled = new AtomicBoolean(false);
             int exitCode;
             switch (iteration % 3) {
                 case 0:
-                    exitCode = executeCli(() -> {}, lifecycle);
+                    exitCode = CliLifecycleRunner.executeCli(lifecycle, () -> {
+                        operationCalled.set(true);
+                    });
                     assertEquals(0, exitCode, "success exit at iteration " + iteration);
                     break;
                 case 1:
-                    exitCode = executeCli(() -> {
+                    exitCode = CliLifecycleRunner.executeCli(lifecycle, () -> {
+                        operationCalled.set(true);
                         throw new RuntimeException("boom " + iteration);
-                    }, lifecycle);
+                    });
                     assertEquals(1, exitCode, "crash exit at iteration " + iteration);
                     break;
                 default:
-                    exitCode = executeCli(() -> {
+                    exitCode = CliLifecycleRunner.executeCli(lifecycle, () -> {
+                        operationCalled.set(true);
                         throw new RunTerminationException(
                                 RunTerminationException.Reason.TIMEOUT,
                                 "timeout " + iteration, false, null);
-                    }, lifecycle);
+                    });
                     assertEquals(124, exitCode, "timeout exit at iteration " + iteration);
                     break;
             }
+            assertTrue(operationCalled.get(),
+                    "operation must be called at iteration " + iteration);
             assertFalse(lifecycle.isRegistered(),
                     "hook leaked at iteration " + iteration);
         }

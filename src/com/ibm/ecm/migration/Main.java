@@ -40,23 +40,10 @@ public class Main {
             logger.warn("Could not read CLI shutdown grace; using 60 seconds: {}", e.getMessage());
         }
         CliShutdownLifecycle lifecycle = new CliShutdownLifecycle(graceSeconds);
-        boolean terminationConfirmed = true;
-        int exitCode = 0;
-        try {
-            lifecycle.register();
-            startMigration(configPath);
-        } catch (RunTerminationException e) {
-            terminationConfirmed = e.isTerminationConfirmed();
-            exitCode = e.getExitCode();
-            logger.error("Migration terminated: {}", e.getMessage(), e.getCause());
-        } catch (Exception e) {
-            terminationConfirmed = false;
-            exitCode = 1;
-            logger.error("Migration failed", e);
-        } finally {
-            lifecycle.finish(terminationConfirmed);
-        }
-        return exitCode;
+        // ponytail: local variable must be effectively final for the lambda.
+        @SuppressWarnings("resource")
+        String finalConfigPath = configPath;
+        return CliLifecycleRunner.executeCli(lifecycle, () -> startMigration(finalConfigPath));
     }
 
     /**

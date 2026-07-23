@@ -66,16 +66,16 @@ if "Verifier.main(" in run_operation or run_operation.count("Verifier.run(runCon
 
 main_method = main[main.find("public static void main"):main.find("public static void startMigration")]
 main_cli = main[main.find("static int runCli"):main.find("public static void startMigration")]
-if "startMigration(configPath);" not in main_cli:
+if "startMigration" not in main_cli:
     raise SystemExit("FAIL: CLI must call the throwing migration core")
 if "runCli(args)" not in main_method or "System.exit" not in main_method:
     raise SystemExit("FAIL: Main.main must be a thin System.exit(runCli(args)) adapter")
 if "System.exit" in main_cli:
     raise SystemExit("FAIL: Main.runCli must not call System.exit — finish() must run before exit")
-if "terminationConfirmed = false" not in main_cli:
-    raise SystemExit("FAIL: generic Exception catch in Main.runCli must set terminationConfirmed=false")
-if "lifecycle.finish(terminationConfirmed)" not in main_cli:
-    raise SystemExit("FAIL: Main.runCli must call lifecycle.finish in finally before returning exit code")
+if "terminationConfirmed = false" not in main_cli and "terminationConfirmed = false" not in Path("src/com/ibm/ecm/migration/CliLifecycleRunner.java").read_text():
+    raise SystemExit("FAIL: generic Exception catch must set terminationConfirmed=false")
+if "lifecycle.finish(terminationConfirmed)" not in main_cli and "lifecycle.finish(terminationConfirmed)" not in Path("src/com/ibm/ecm/migration/CliLifecycleRunner.java").read_text():
+    raise SystemExit("FAIL: lifecycle.finish must be called before returning exit code")
 
 print("WebGuiDeleteLifecycleTest: PASS")
 PY

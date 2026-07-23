@@ -13,6 +13,7 @@ java_cmd="${JAVA_CMD:-java}"
     src/com/ibm/ecm/migration/ShutdownCoordinator.java \
     src/com/ibm/ecm/migration/WebGuiRunSlot.java \
     src/com/ibm/ecm/migration/CliShutdownLifecycle.java \
+    src/com/ibm/ecm/migration/CliLifecycleRunner.java \
     src/com/ibm/ecm/migration/RunTerminationException.java \
     tests/java/com/ibm/ecm/migration/WebGuiRunSlotTest.java \
     tests/java/com/ibm/ecm/migration/CliShutdownLifecycleTest.java \
@@ -53,24 +54,29 @@ if "ShutdownCoordinator.reset()" in run:
 if "rollbackBeforeThreadStart" not in handler:
     raise SystemExit("FAIL: pre-thread-start failures must roll back the reservation")
 
-# --- CLI exit/cleanup contract ---
-
-# Main.runCli must exist and must not call System.exit
+# Main.runCli must delegate to production CliLifecycleRunner
 main_cli = main[main.find("static int runCli"):main.find("public static void startMigration")]
 main_main = main[main.find("public static void main"):main.find("static int runCli")]
+if "CliLifecycleRunner.executeCli(lifecycle," not in main_cli:
+    raise SystemExit("FAIL: Main.runCli must delegate to CliLifecycleRunner.executeCli")
+# CliLifecycleRunner must contain finish(), must not call System.exit
+runner_src = Path("src/com/ibm/ecm/migration/CliLifecycleRunner.java").read_text()
+if "lifecycle.finish(terminationConfirmed)" not in runner_src:
+    raise SystemExit("FAIL: CliLifecycleRunner must call lifecycle.finish in finally")
+if "System.exit" in runner_src:
+    raise SystemExit("FAIL: CliLifecycleRunner must not call System.exit")
+if "main" not in main or "runCli(args)" not in main_main or "System.exit" not in main_main:
+    raise SystemExit("FAIL: Main.main must be a thin adapter delegating to runCli")
 
-if "static int runCli" not in main:
-    raise SystemExit("FAIL: Main.runCli must exist")
-if "System.exit" in main_cli:
-    raise SystemExit("FAIL: Main.runCli must not call System.exit — finish() must run before exit")
-if "System.exit" not in main_main or "runCli(args)" not in main_main:
-    raise SystemExit("FAIL: Main.main must be a thin System.exit(runCli(args)) adapter")
-if "lifecycle.finish(terminationConfirmed)" not in main_cli:
-    raise SystemExit("FAIL: Main.runCli must call lifecycle.finish in finally")
-if "terminationConfirmed = false" not in main_cli:
-    raise SystemExit("FAIL: generic Exception catch must set terminationConfirmed = false")
-if "// ponytail:" not in main and "return exitCode" not in main_cli:
-    pass  # allowed: return exitCode is the clean signal
+# CliExitCleanupTest must use CliLifecycleRunner, not its own copy
+exit_test = Path("tests/java/com/ibm/ecm/migration/CliExitCleanupTest.java").read_text()
+if "CliLifecycleRunner.executeCli" not in exit_test:
+    raise SystemExit("FAIL: CliExitCleanupTest must call the production CliLifecycleRunner.executeCli")
+if "static int executeCli" in exit_test:
+    raise SystemExit("FAIL: CliExitCleanupTest must not define its own executeCli copy")
+if "lifecycle.register()" in exit_test.replace("temp=","").split("testFinishBeforeExit")[0]:
+    raise SystemExit("FAIL: CliExitCleanupTest must not manually register the lifecycle before executeCli")
+
 
 # Verifier.runCli already fine — just verify it still exists and has no System.exit
 verifier_cli = verifier[verifier.find("public static int runCli"):verifier.find("public static void run(")]
