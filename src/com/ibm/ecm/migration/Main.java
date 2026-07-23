@@ -18,11 +18,15 @@ public class Main {
     private static final Logger logger = LogManager.getLogger(Main.class);
 
     public static void main(String[] args) {
+        System.exit(runCli(args));
+    }
+
+    static int runCli(String[] args) {
         // Start-Banner in der Konsole ausgeben
         System.out.println(ConsoleUI.banner("2.2.1"));
-       
+
         logger.info("Starting IBM CM Migrator V8.7...");
-         
+
         String configPath = "conf/migration.properties";
         if (args.length > 0) {
             configPath = args[0];
@@ -37,21 +41,24 @@ public class Main {
         }
         CliShutdownLifecycle lifecycle = new CliShutdownLifecycle(graceSeconds);
         boolean terminationConfirmed = true;
+        int exitCode = 0;
         try {
             lifecycle.register();
             startMigration(configPath);
         } catch (RunTerminationException e) {
             terminationConfirmed = e.isTerminationConfirmed();
+            exitCode = e.getExitCode();
             logger.error("Migration terminated: {}", e.getMessage(), e.getCause());
-            System.exit(e.getExitCode());
         } catch (Exception e) {
+            terminationConfirmed = false;
+            exitCode = 1;
             logger.error("Migration failed", e);
-            System.exit(1);
         } finally {
             lifecycle.finish(terminationConfirmed);
         }
+        return exitCode;
     }
-    
+
     /**
      * Startet den Migrationsprozess basierend auf der angegebenen Konfigurationsdatei.
      * Wird auch von der WebGUI aufgerufen, um Ressourcenkonflikte zu vermeiden.
