@@ -276,7 +276,7 @@ Für `PROFILE` selbst existiert kein Code-Default. Der Vorlagenwert ist keine au
 | `THREAD_COUNT` | nein | 5, Bereich 1–200 | Consumer-Anzahl | nach IBM-/DB-/Heap-Test dimensionieren |
 | `SOURCE_POOL_SIZE` | nein | `THREAD_COUNT + 1`, Bereich 1–500 | Source-Pool | im Delete-Pfad besonders relevant |
 | `DEST_POOL_SIZE` | nein | `THREAD_COUNT`, Bereich 1–500 | Destination-Pool | im Delete-Modus effektiv 0 |
-| `PRODUCER_COUNT_STRATEGY` | nein | `HYBRID` | wird gelesen und geloggt | Producer führt aktuell unabhängig davon SDK-Pass-1 aus |
+| `PRODUCER_COUNT_STRATEGY` | nein | `SINGLE_PASS` | `SINGLE_PASS` oder `SDK_CURSOR`; unbekannte Werte führen zu fail-fast | `SDK_CURSOR` führt zwei Cursor-Pässe aus (Zählen + Enqueue), `SINGLE_PASS` enqueued direkt |
 
 ### 6.6 Batch- und Queue-Verhalten
 
@@ -582,7 +582,7 @@ Bei normalem Producer-Ende wird je Consumer eine Poison Pill gesendet. Bei Shutd
 
 Per-Item-Consumerfehler werden geloggt/journaled und können Retries auslösen. Sie führen nicht zwingend zu einem Prozessfehler. Ein Producer-/Discovery-Fehler wird dagegen zentral gespeichert, fordert Shutdown an und wird nach Cleanup weitergereicht.
 
-Parallelität wird über Threads, Queue, Batch und Pools begrenzt. `PRODUCER_COUNT_STRATEGY` ändert im aktuellen Producer den tatsächlich ausgeführten SDK-Pass-1 nicht nachweislich.
+Parallelität wird über Threads, Queue, Batch und Pools begrenzt. `PRODUCER_COUNT_STRATEGY` steuert den Cursor-Modus: `SINGLE_PASS` (Standard) enqueued in einem Durchlauf, `SDK_CURSOR` führt zwei Pässe aus (Zählen + Enqueue). Unbekannte Werte führen zu fail-fast.
 
 Der separate `com.example.migrator`-Prototyp besitzt mit `JdbcItemReader` eine andere, direkte DB2-Discovery. Sie ist nicht Teil von `cm-run.sh`, `bin/compile.sh`, der Safety-Härtungen oder der dokumentierten Tests und wird daher nicht als Alternative empfohlen.
 

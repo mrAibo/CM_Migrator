@@ -206,91 +206,170 @@ public class Producer implements Runnable {
                     new DKNVPair(DKConstant.DK_CM_PARM_END, null)
             };
 
-            // PASS 1: Zählen (TOTAL) - immer, auch bei DELETE.
-            // Wichtig: Total muss vor PASS2 stabil sein und darf während Enqueue nicht wachsen.
+            // Producer Count Strategy dispatch
             String strategy = config.getProducerCountStrategy();
-            long totalMatched = 0;
-            
-            logger.info("Using SDK-based PASS1 count for {} (Strategy={}, OperationMode={})",
-                    sourceType, strategy, config.getOperationMode());
-            
-            dkResultSetCursor cursor = ds.execute(query, DKConstant.DK_CM_XQPE_QL_TYPE, options);
-            
-            try {
-                DKDDO item;
-                while (!ShutdownCoordinator.isShuttingDown()
-                        && (item = cursor.fetchNext()) != null) {
-                    totalMatched++;
-                }
-            
-                if (!ShutdownCoordinator.isShuttingDown()) {
-                    stats.addTotalItems(totalMatched);
-                    logger.info("SDK PASS1 matched for {}: {}", sourceType, totalMatched);
-                } else {
-                    logger.warn("SDK PASS1 interrupted by shutdown for {} after {} matched items",
-                            sourceType, totalMatched);
-                    return;
-                }
-            } finally {
-                cursor.close();
-                cursor.destroy();
+            switch (strategy) {
+                case "SDK_CURSOR":
+                    processTwoPass(ds, query, sourceType, destType, isDeleteMode, options);
+                    break;
+                case "SINGLE_PASS":
+                    processSinglePass(ds, query, sourceType, destType, isDeleteMode, options);
+                    break;
+                default:
+                    throw new IllegalArgumentException(
+                        "Unsupported PRODUCER_COUNT_STRATEGY: " + strategy +
+                        ". Supported: SDK_CURSOR, SINGLE_PASS");
+            }
+    }
+
+    private void processTwoPass(DKDatastoreICM ds, String query, String sourceType,
+                                String destType, boolean isDeleteMode, DKNVPair[] options) throws Exception {
+        // PASS 1: Zählen (TOTAL)
+        logger.info("SDK_CURSOR PASS1 for {} (OperationMode={})", sourceType, config.getOperationMode());
+        long totalMatched = 0;
+
+        dkResultSetCursor cursor = ds.execute(query, DKConstant.DK_CM_XQPE_QL_TYPE, options);
+
+        try {
+            DKDDO item;
+            while (!ShutdownCoordinator.isShuttingDown()
+                    && (item = cursor.fetchNext()) != null) {
+                totalMatched++;
             }
 
-            // PASS 2: Enqueue (Verarbeitung)
-            dkResultSetCursor cursor2 = ds.execute(query, DKConstant.DK_CM_XQPE_QL_TYPE, options);
-            
-            long fetched = 0;
-            long enqueued = 0;
-            long skipped = 0;
-            long tStart = System.currentTimeMillis();
+            if (!ShutdownCoordinator.isShuttingDown()) {
+                stats.addTotalItems(totalMatched);
+                logger.info("SDK_CURSOR PASS1 matched for {}: {}", sourceType, totalMatched);
+            } else {
+                logger.warn("SDK_CURSOR PASS1 interrupted by shutdown for {} after {} matched items",
+                        sourceType, totalMatched);
+                return;
+            }
+        } finally {
+            cursor.close();
+            cursor.destroy();
+        }
 
-            try {
-                DKDDO item;
-                while (!ShutdownCoordinator.isShuttingDown()
-                        && (item = cursor2.fetchNext()) != null) {
-                        
-                    fetched++;
-                    String pidStr = ((DKPidICM) item.getPidObject()).pidString();
+        // PASS 2: Enqueue (Verarbeitung)
+        dkResultSetCursor cursor2 = ds.execute(query, DKConstant.DK_CM_XQPE_QL_TYPE, options);
 
-                    // Journal prüfen
-                    boolean alreadyDone = isDeleteMode 
-                            ? journal.isDeleted(pidStr, sourceType) 
-                            : journal.isMigrated(pidStr, sourceType);
+        long fetched = 0;
+        long enqueued = 0;
+        long skipped = 0;
+        long tStart = System.currentTimeMillis();
 
-                    if (alreadyDone) {
-                        skipped++;
-                        stats.incrementSkipped();
-                        continue;
-                    }
+        try {
+            DKDDO item;
+            while (!ShutdownCoordinator.isShuttingDown()
+                    && (item = cursor2.fetchNext()) != null) {
 
-                    MigrationItem migrationItem = new MigrationItem(pidStr, sourceType, destType);
+                fetched++;
+                String pidStr = ((DKPidICM) item.getPidObject()).pidString();
 
-                    while (!ShutdownCoordinator.isShuttingDown()) {
-                        if (queue.offer(migrationItem, 1, TimeUnit.SECONDS)) {
-                            enqueued++;
-                            break;
-                        }
-                    }
+                // Journal prüfen
+                boolean alreadyDone = isDeleteMode
+                        ? journal.isDeleted(pidStr, sourceType)
+                        : journal.isMigrated(pidStr, sourceType);
 
-                    if (ShutdownCoordinator.isShuttingDown()) {
-                        logger.warn("Producer stopping enqueue for {} due to shutdown. Fetched={}, Enqueued={}, Skipped={}",
-                                sourceType, fetched, enqueued, skipped);
+                if (alreadyDone) {
+                    skipped++;
+                    stats.incrementSkipped();
+                    continue;
+                }
+
+                MigrationItem migrationItem = new MigrationItem(pidStr, sourceType, destType);
+
+                while (!ShutdownCoordinator.isShuttingDown()) {
+                    if (queue.offer(migrationItem, 1, TimeUnit.SECONDS)) {
+                        enqueued++;
                         break;
                     }
+                }
 
-                    if (fetched % 10000 == 0) {
-                         logger.info("Producer Progress {}: Fetched={}, Enqueued={}, Skipped={}", sourceType, fetched, enqueued, skipped);
+                if (ShutdownCoordinator.isShuttingDown()) {
+                    logger.warn("SDK_CURSOR stopping enqueue for {} due to shutdown. Fetched={}, Enqueued={}, Skipped={}",
+                            sourceType, fetched, enqueued, skipped);
+                    break;
+                }
+
+                if (fetched % 10000 == 0) {
+                    logger.info("SDK_CURSOR Progress {}: Fetched={}, Enqueued={}, Skipped={}", sourceType, fetched, enqueued, skipped);
+                }
+            }
+        } finally {
+            cursor2.close();
+            cursor2.destroy();
+        }
+
+        long duration = System.currentTimeMillis() - tStart;
+        long avgFetch = fetched > 0 ? duration / fetched : 0;
+
+        logger.info("SDK_CURSOR STATS Type={} Fetched={} Enqueued={} Skipped={} AvgFetchMs={} QueueDepth={}",
+                sourceType, fetched, enqueued, skipped, avgFetch, queue.size());
+    }
+
+    private void processSinglePass(DKDatastoreICM ds, String query, String sourceType,
+                                    String destType, boolean isDeleteMode, DKNVPair[] options) throws Exception {
+        logger.info("SINGLE_PASS for {} (OperationMode={})", sourceType, config.getOperationMode());
+
+        dkResultSetCursor cursor = ds.execute(query, DKConstant.DK_CM_XQPE_QL_TYPE, options);
+
+        long fetched = 0;
+        long enqueued = 0;
+        long skipped = 0;
+        long tStart = System.currentTimeMillis();
+
+        try {
+            DKDDO item;
+            while (!ShutdownCoordinator.isShuttingDown()
+                    && (item = cursor.fetchNext()) != null) {
+
+                fetched++;
+                String pidStr = ((DKPidICM) item.getPidObject()).pidString();
+
+                // Journal prüfen
+                boolean alreadyDone = isDeleteMode
+                        ? journal.isDeleted(pidStr, sourceType)
+                        : journal.isMigrated(pidStr, sourceType);
+
+                if (alreadyDone) {
+                    skipped++;
+                    stats.incrementSkipped();
+                    continue;
+                }
+
+                MigrationItem migrationItem = new MigrationItem(pidStr, sourceType, destType);
+
+                while (!ShutdownCoordinator.isShuttingDown()) {
+                    if (queue.offer(migrationItem, 1, TimeUnit.SECONDS)) {
+                        enqueued++;
+                        break;
                     }
                 }
-            } finally {
-                cursor2.close();
-                cursor2.destroy();
+
+                if (ShutdownCoordinator.isShuttingDown()) {
+                    logger.warn("SINGLE_PASS stopping enqueue for {} due to shutdown. Fetched={}, Enqueued={}, Skipped={}",
+                            sourceType, fetched, enqueued, skipped);
+                    break;
+                }
+
+                if (fetched % 10000 == 0) {
+                    logger.info("SINGLE_PASS Progress {}: Fetched={}, Enqueued={}, Skipped={}", sourceType, fetched, enqueued, skipped);
+                }
             }
+        } finally {
+            cursor.close();
+            cursor.destroy();
+        }
 
-            long duration = System.currentTimeMillis() - tStart;
-            long avgFetch = fetched > 0 ? duration / fetched : 0;
+        if (!ShutdownCoordinator.isShuttingDown()) {
+            stats.addTotalItems(fetched);
+        }
 
-        logger.info("PRODUCER STATS Type={} Fetched={} Enqueued={} Skipped={} AvgFetchMs={} QueueDepth={}",
+        long duration = System.currentTimeMillis() - tStart;
+        long avgFetch = fetched > 0 ? duration / fetched : 0;
+
+        logger.info("SINGLE_PASS STATS Type={} Fetched={} Enqueued={} Skipped={} AvgFetchMs={} QueueDepth={}",
                 sourceType, fetched, enqueued, skipped, avgFetch, queue.size());
     }
 

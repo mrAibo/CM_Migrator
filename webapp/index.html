@@ -162,8 +162,7 @@
                 <div class="form-group">
                     <label for="producerCountStrategy">PRODUCER_COUNT_STRATEGY</label>
                     <select id="producerCountStrategy">
-                        <option value="HYBRID">HYBRID</option>
-                        <option value="COUNT_SQL">COUNT_SQL</option>
+                        <option value="SINGLE_PASS">SINGLE_PASS</option>
                         <option value="SDK_CURSOR">SDK_CURSOR</option>
                     </select>
                 </div>
@@ -754,7 +753,7 @@
                 document.getElementById('operationMode').value = cfg.OPERATION_MODE || 'MIGRATE';
                 document.getElementById('dryRun').checked = String(cfg.DRY_RUN || 'false').toLowerCase() === 'true';
                 document.getElementById('dbPath').value = cfg.DB_PATH || './data/migration_journal';
-                document.getElementById('producerCountStrategy').value = cfg.PRODUCER_COUNT_STRATEGY || 'HYBRID';
+                document.getElementById('producerCountStrategy').value = cfg.PRODUCER_COUNT_STRATEGY || 'SINGLE_PASS';
                 document.getElementById('profile').value = cfg.PROFILE || 'MITTEL';
 
                 const override = cfg.THREAD_COUNT || cfg.BATCH_SIZE || cfg.QUEUE_SIZE || cfg.SOURCE_POOL_SIZE || cfg.DEST_POOL_SIZE;
