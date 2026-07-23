@@ -210,19 +210,19 @@ public class Producer implements Runnable {
             // Wichtig: Total muss vor PASS2 stabil sein und darf während Enqueue nicht wachsen.
             String strategy = config.getProducerCountStrategy();
             long totalMatched = 0;
-            
+
             logger.info("Using SDK-based PASS1 count for {} (Strategy={}, OperationMode={})",
                     sourceType, strategy, config.getOperationMode());
-            
+
             dkResultSetCursor cursor = ds.execute(query, DKConstant.DK_CM_XQPE_QL_TYPE, options);
-            
+
             try {
                 DKDDO item;
                 while (!ShutdownCoordinator.isShuttingDown()
                         && (item = cursor.fetchNext()) != null) {
                     totalMatched++;
                 }
-            
+
                 if (!ShutdownCoordinator.isShuttingDown()) {
                     stats.addTotalItems(totalMatched);
                     logger.info("SDK PASS1 matched for {}: {}", sourceType, totalMatched);
@@ -238,7 +238,7 @@ public class Producer implements Runnable {
 
             // PASS 2: Enqueue (Verarbeitung)
             dkResultSetCursor cursor2 = ds.execute(query, DKConstant.DK_CM_XQPE_QL_TYPE, options);
-            
+
             long fetched = 0;
             long enqueued = 0;
             long skipped = 0;
@@ -248,13 +248,13 @@ public class Producer implements Runnable {
                 DKDDO item;
                 while (!ShutdownCoordinator.isShuttingDown()
                         && (item = cursor2.fetchNext()) != null) {
-                        
+
                     fetched++;
                     String pidStr = ((DKPidICM) item.getPidObject()).pidString();
 
                     // Journal prüfen
-                    boolean alreadyDone = isDeleteMode 
-                            ? journal.isDeleted(pidStr, sourceType) 
+                    boolean alreadyDone = isDeleteMode
+                            ? journal.isDeleted(pidStr, sourceType)
                             : journal.isMigrated(pidStr, sourceType);
 
                     if (alreadyDone) {
