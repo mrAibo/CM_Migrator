@@ -169,28 +169,49 @@ public class Main {
                     null);
         }
 
+        boolean journalClosed = false;
+
         if (!aborted && workersTerminated) {
-            // Generate migration protocol reports if enabled
-            if (config.isGenerateAuditProtocol()) {
-                try {
-                    logger.info("Generating migration protocol reports...");
-                    var reportGenerator = new ProtocolReportGenerator(config);
-                    reportGenerator.generateAllMigrationReports();
-                    logger.info("Migration protocol reports generated in reports/");
-                } catch (Exception e) {
-                    logger.error("Failed to generate protocol reports: {}", e.getMessage(), e);
+            // ponytail: journal MUST close before reports/email so writer
+            // failure is discovered before success output is generated.
+            try {
+                journal.close();
+                journalClosed = true;
+            } catch (Exception e) {
+                logger.error("Journal close failed — marking migration as aborted.", e);
+                aborted = true;
+                if (terminalOutcome == null) {
+                    terminalOutcome = new RunTerminationException(
+                            RunTerminationException.Reason.FAILED,
+                            "Journal persistence failure: " + e.getMessage(),
+                            true,
+                            e);
                 }
             }
 
-            // Legacy report and Email notification
-            try {
-                ReportGenerator.generateMigrationReport(config, stats, config.getOperationMode());
-                if (config.getEmailTo() != null && !config.getEmailTo().isEmpty()) {
-                    logger.info("Sending migration status email to: {}", config.getEmailTo());
-                    EmailNotifier.sendReport(config, "migration_report.html", config.getOperationMode(), stats);
+            if (!aborted && workersTerminated) {
+                // Generate migration protocol reports if enabled
+                if (config.isGenerateAuditProtocol()) {
+                    try {
+                        logger.info("Generating migration protocol reports...");
+                        var reportGenerator = new ProtocolReportGenerator(config);
+                        reportGenerator.generateAllMigrationReports();
+                        logger.info("Migration protocol reports generated in reports/");
+                    } catch (Exception e) {
+                        logger.error("Failed to generate protocol reports: {}", e.getMessage(), e);
+                    }
                 }
-            } catch (Exception e) {
-                logger.error("Failed to generate legacy report or send email: {}", e.getMessage());
+
+                // Legacy report and Email notification
+                try {
+                    ReportGenerator.generateMigrationReport(config, stats, config.getOperationMode());
+                    if (config.getEmailTo() != null && !config.getEmailTo().isEmpty()) {
+                        logger.info("Sending migration status email to: {}", config.getEmailTo());
+                        EmailNotifier.sendReport(config, "migration_report.html", config.getOperationMode(), stats);
+                    }
+                } catch (Exception e) {
+                    logger.error("Failed to generate legacy report or send email: {}", e.getMessage());
+                }
             }
         } else {
             logger.warn("Migration did not complete normally. Skipping final reports and email notification.");
@@ -198,8 +219,11 @@ public class Main {
 
         if (workersTerminated) {
             // Only disconnect resources after every worker has definitely stopped.
+            // ponytail: journal already closed above; guard against double-close.
+            if (!journalClosed) {
+                try { journal.close(); } catch (Exception ignored) {}
+            }
             pool.close();
-            journal.close();
             monitorThread.interrupt();
             try {
                 monitorThread.join(5000);
