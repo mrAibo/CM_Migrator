@@ -74,7 +74,7 @@ public final class ConsoleDashboardTest {
         s.journalQueueCapacity = 100000;
         s.journalPersisted = 41850;
         s.journalHealth = OperatorConsole.JournalHealth.HEALTHY;
-        s.activeWorkers = 8;
+        s.configuredWorkers = 8;
         return s;
     }
 

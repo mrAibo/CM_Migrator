@@ -79,13 +79,14 @@ public final class OperatorConsole {
         int queueCapacity = 0;
         int journalQueueDepth = 0;
         int journalQueueCapacity = 0;
-        long journalPersisted = 0;
+        long journalPersisted = -1; // ponytail: -1 = n/a, NOT 0
         JournalHealth journalHealth = JournalHealth.HEALTHY;
         String journalError;
-        long poolSourceLatencyMs = 0;
-        long poolDestLatencyMs = 0;
-        int poolErrors = 0;
-        int activeWorkers = 0;
+        // ponytail: pool metrics not measured → n/a (null)
+        Long poolSourceLatencyMs = null;
+        Long poolDestLatencyMs = null;
+        Integer poolErrors = null;
+        int configuredWorkers = 0;
         String lastWarning;
         long lastProgressMs = 0;
         boolean streaming = false;
@@ -296,7 +297,7 @@ public final class OperatorConsole {
         if (s.queueCapacity > 0 && s.queueDepth >= s.queueCapacity) {
             out.append(' ').append(c(ConsoleUI.RED)).append("FULL").append(r());
         }
-        out.append(pad(2)).append("workers=").append(s.activeWorkers).append(" active");
+        out.append(pad(2)).append("workers=").append(s.configuredWorkers).append(" configured");
         out.append(c(ConsoleUI.BRIGHT_CYAN)).append(boxV).append('\n');
 
         // ── Journal section ──
@@ -306,7 +307,7 @@ public final class OperatorConsole {
         out.append(pad(2));
         out.append("queue=").append(fmt(s.journalQueueDepth)).append('/').append(fmt(s.journalQueueCapacity));
         out.append(pad(2));
-        out.append("persisted=").append(fmt(s.journalPersisted));
+        out.append("persisted=").append(s.journalPersisted >= 0 ? fmt(s.journalPersisted) : c(ConsoleUI.DIM) + "n/a" + r());
         if (s.journalError != null && !s.journalError.isEmpty()) {
             out.append(' ').append(c(ConsoleUI.RED)).append(trunc(s.journalError, 20)).append(r());
         }
@@ -314,13 +315,15 @@ public final class OperatorConsole {
 
         // ── CM Pools ──
         out.append(c(ConsoleUI.BRIGHT_CYAN)).append(boxV).append(r());
-        out.append(" CM Pools: src=").append(fmt(s.poolSourceLatencyMs)).append("ms");
-        out.append(pad(2)).append("dst=").append(fmt(s.poolDestLatencyMs)).append("ms");
+        out.append(" CM Pools: src=").append(s.poolSourceLatencyMs != null ? s.poolSourceLatencyMs + "ms" : c(ConsoleUI.DIM) + "n/a" + r());
+        out.append(pad(2)).append("dst=").append(s.poolDestLatencyMs != null ? s.poolDestLatencyMs + "ms" : c(ConsoleUI.DIM) + "n/a" + r());
         out.append(pad(2)).append("errors=");
-        if (s.poolErrors > 0) {
+        if (s.poolErrors != null && s.poolErrors > 0) {
             out.append(c(ConsoleUI.RED)).append(s.poolErrors).append(r());
-        } else {
+        } else if (s.poolErrors != null) {
             out.append(c(ConsoleUI.GREEN)).append('0').append(r());
+        } else {
+            out.append(c(ConsoleUI.DIM)).append("n/a").append(r());
         }
         out.append(c(ConsoleUI.BRIGHT_CYAN)).append(boxV).append('\n');
 
@@ -406,7 +409,7 @@ public final class OperatorConsole {
 
         // Pipeline
         out.append(boxV).append(" q:").append(fmt(s.queueDepth)).append('/').append(fmt(s.queueCapacity));
-        out.append(" w:").append(s.activeWorkers);
+        out.append(" w:").append(s.configuredWorkers);
         out.append(' ').append(c(ConsoleUI.BRIGHT_CYAN)).append(boxV).append('\n');
 
         // Journal
@@ -415,7 +418,9 @@ public final class OperatorConsole {
         out.append(' ').append(c(ConsoleUI.BRIGHT_CYAN)).append(boxV).append('\n');
 
         // Pools
-        out.append(boxV).append(" pool src=").append(fmt(s.poolSourceLatencyMs)).append("ms dst=").append(fmt(s.poolDestLatencyMs)).append("ms err=").append(s.poolErrors);
+        out.append(boxV).append(" pool src=").append(s.poolSourceLatencyMs != null ? s.poolSourceLatencyMs + "ms" : "n/a");
+        out.append(" dst=").append(s.poolDestLatencyMs != null ? s.poolDestLatencyMs + "ms" : "n/a");
+        out.append(" err=").append(s.poolErrors != null ? String.valueOf(s.poolErrors) : "n/a");
         out.append(' ').append(c(ConsoleUI.BRIGHT_CYAN)).append(boxV).append('\n');
 
         // Footer
@@ -463,15 +468,15 @@ public final class OperatorConsole {
         out.append(" elapsed=").append(fmtDuration(s.elapsedMs)).append('\n');
 
         out.append("queue=").append(fmt(s.queueDepth)).append('/').append(fmt(s.queueCapacity));
-        out.append(" workers=").append(s.activeWorkers).append('\n');
+        out.append(" workers=").append(s.configuredWorkers).append('\n');
 
         out.append("journal=").append(journalHealthStrPlain(s.journalHealth));
         out.append(" jq=").append(fmt(s.journalQueueDepth)).append('/').append(fmt(s.journalQueueCapacity));
-        out.append(" persisted=").append(fmt(s.journalPersisted)).append('\n');
+        out.append(" persisted=").append(s.journalPersisted >= 0 ? fmt(s.journalPersisted) : "n/a").append('\n');
 
-        out.append("pool_src=").append(fmt(s.poolSourceLatencyMs)).append("ms");
-        out.append(" pool_dst=").append(fmt(s.poolDestLatencyMs)).append("ms");
-        out.append(" pool_errors=").append(s.poolErrors).append('\n');
+        out.append("pool_src=").append(s.poolSourceLatencyMs != null ? s.poolSourceLatencyMs + "ms" : "n/a");
+        out.append(" pool_dst=").append(s.poolDestLatencyMs != null ? s.poolDestLatencyMs + "ms" : "n/a");
+        out.append(" pool_errors=").append(s.poolErrors != null ? String.valueOf(s.poolErrors) : "n/a").append('\n');
 
         String stall = stallLabel(s.lastProgressMs);
         if (!stall.isEmpty()) {
@@ -508,6 +513,9 @@ public final class OperatorConsole {
         out.append(" journal=").append(journalHealthStrPlain(s.journalHealth));
         out.append(" journal_queue=").append(s.journalQueueDepth).append('/').append(s.journalQueueCapacity);
         out.append(" last_progress=").append(formatLastProgress(s.lastProgressMs));
+        out.append(" pool_source_latency=").append(s.poolSourceLatencyMs != null ? s.poolSourceLatencyMs + "ms" : "n/a");
+        out.append(" pool_dest_latency=").append(s.poolDestLatencyMs != null ? s.poolDestLatencyMs + "ms" : "n/a");
+        out.append(" pool_errors=").append(s.poolErrors != null ? s.poolErrors : "n/a");
     }
 
     // ── Helpers ───────────────────────────────────────────────────────

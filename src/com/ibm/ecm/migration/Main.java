@@ -113,7 +113,7 @@ public class Main {
                     current.journalPersisted = journal.getPersistedCount();
                     current.journalHealth = journalHealthFromString(journal.getJournalHealth());
                     current.journalError = journal.getJournalError();
-                    current.activeWorkers = threadCount; // ponytail: fixed pool size
+                    current.configuredWorkers = threadCount; // ponytail: fixed pool size
                 }
                 OperatorConsole.draw(current);
             }
@@ -121,8 +121,15 @@ public class Main {
         consoleThread.setDaemon(true);
         consoleThread.start();
 
+        // ── Declarations that must outlive the migration try/finally
+        RunTerminationException terminalOutcome = null;
+        WorkerTermination.Outcome termination = null;
+        boolean aborted = false;
+        boolean journalClosed = false;
+
         // ─── Connection Pool ───
-        CMConnectionPool pool = new CMConnectionPool(config);
+        try {
+            CMConnectionPool pool = new CMConnectionPool(config);
         pool.init();
         MigrationMetrics.register(stats, queue, config.getSourceSSID(), config.getDestSSID());
         startResourceMonitor();
@@ -138,8 +145,7 @@ public class Main {
         }
 
         // ─── Bounded two-stage wait ───
-        RunTerminationException terminalOutcome = null;
-        WorkerTermination.Outcome termination;
+        terminalOutcome = null;
         try {
             termination = WorkerTermination.await(workerExecutor,
                     config.getWorkerTimeoutSeconds(),
@@ -166,7 +172,7 @@ public class Main {
                     workersTerminated, null);
         }
 
-        boolean aborted = terminalOutcome != null
+        aborted = terminalOutcome != null
                 || ShutdownCoordinator.isShuttingDown()
                 || workerFailureState.hasFailure();
         if (terminalOutcome == null && ShutdownCoordinator.isShuttingDown()) {
@@ -176,14 +182,14 @@ public class Main {
         }
 
         // ─── Journal close before reports (PR #13 invariant) ───
-        boolean journalClosed = false;
+        journalClosed = false;
         if (!aborted && workersTerminated) {
             synchronized (current) { current.phase = OperatorConsole.Phase.DRAINING_JOURNAL; }
             try {
                 journal.close();
                 journalClosed = true;
                 synchronized (current) {
-                    current.journalHealth = OperatorConsole.JournalHealth.HEALTHY;
+                    current.journalHealth = OperatorConsole.JournalHealth.CLOSED;
                     current.journalQueueDepth = 0;
                 }
             } catch (Exception e) {
@@ -255,11 +261,11 @@ public class Main {
                 current.state = OperatorConsole.RunState.COMPLETED;
             }
         }
-        OperatorConsole.finalRender(current);
-
-        consoleThread.interrupt();
-        try { consoleThread.join(1000); } catch (InterruptedException ignored) {
-            Thread.currentThread().interrupt();
+        } finally {
+            consoleThread.interrupt();
+            try { consoleThread.join(1000); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+            OperatorConsole.finalRender(current);
+            System.out.print(OperatorConsole.showCursor());
         }
 
         // ─── Console summary (after dashboard is done) ───
