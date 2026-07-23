@@ -40,24 +40,24 @@ public class MigrationConfig {
         Map<String, Map<String, String>> p = new HashMap<>();
         p.put("KLEIN", Map.of(
             "THREAD_COUNT", "5", "BATCH_SIZE", "50", "QUEUE_SIZE", "1000",
-            "LOG_ITEMS_BATCHED", "false", "PRODUCER_COUNT_STRATEGY", "HYBRID"
+            "LOG_ITEMS_BATCHED", "false", "PRODUCER_COUNT_STRATEGY", "SINGLE_PASS"
         ));
         p.put("MITTEL", Map.of(
             "THREAD_COUNT", "20", "BATCH_SIZE", "200", "QUEUE_SIZE", "5000",
-            "LOG_ITEMS_BATCHED", "true", "LOG_BATCH_INTERVAL", "1000", "PRODUCER_COUNT_STRATEGY", "HYBRID"
+            "LOG_ITEMS_BATCHED", "true", "LOG_BATCH_INTERVAL", "1000", "PRODUCER_COUNT_STRATEGY", "SINGLE_PASS"
         ));
         p.put("GROSS", Map.of(
             "THREAD_COUNT", "50", "BATCH_SIZE", "500", "QUEUE_SIZE", "10000",
-            "LOG_ITEMS_BATCHED", "true", "LOG_BATCH_INTERVAL", "5000", "PRODUCER_COUNT_STRATEGY", "HYBRID"
+            "LOG_ITEMS_BATCHED", "true", "LOG_BATCH_INTERVAL", "5000", "PRODUCER_COUNT_STRATEGY", "SINGLE_PASS"
         ));
         p.put("EXTREM", Map.of(
             "THREAD_COUNT", "100", "BATCH_SIZE", "1000", "QUEUE_SIZE", "20000",
-            "LOG_ITEMS_BATCHED", "true", "LOG_BATCH_INTERVAL", "10000", "PRODUCER_COUNT_STRATEGY", "COUNT_SQL",
+            "LOG_ITEMS_BATCHED", "true", "LOG_BATCH_INTERVAL", "10000", "PRODUCER_COUNT_STRATEGY", "SDK_CURSOR",
             "DB_URL_APPEND", ";LOG=0;CACHE_SIZE=65536;LOCK_MODE=0"
         ));
         p.put("ULTI", Map.of(
             "THREAD_COUNT", "200", "BATCH_SIZE", "2000", "QUEUE_SIZE", "50000",
-            "LOG_ITEMS_BATCHED", "true", "LOG_BATCH_INTERVAL", "10000", "PRODUCER_COUNT_STRATEGY", "COUNT_SQL",
+            "LOG_ITEMS_BATCHED", "true", "LOG_BATCH_INTERVAL", "10000", "PRODUCER_COUNT_STRATEGY", "SDK_CURSOR",
             "DB_URL_APPEND", ";LOG=0;CACHE_SIZE=131072;LOCK_MODE=0;MAX_OPERATION_MEMORY=256000000"
         ));
         PROFILES = Collections.unmodifiableMap(p);
@@ -377,10 +377,10 @@ public class MigrationConfig {
 
     /**
      * Strategie zur Ermittlung der Item-Anzahl
-     * Werte: HYBRID (Standard), COUNT_SQL, SDK_CURSOR
+     * Werte: SDK_CURSOR, SINGLE_PASS (Standard)
      */
     public String getProducerCountStrategy() {
-        return prop("PRODUCER_COUNT_STRATEGY", "HYBRID").toUpperCase();
+        return prop("PRODUCER_COUNT_STRATEGY", "SINGLE_PASS").toUpperCase();
     }
 
     /**

@@ -313,9 +313,9 @@ Hilfsmethoden: `awaitGrace()` für Shutdown-Request + Grace-Phase, `awaitGraceAf
 **v2.2.1:** Bei Shutdown oder Producer-Fehler werden **keine** normalen Poison-Pills gesendet; Consumer verlassen den Loop über das globale Shutdown-Signal.
 
 **Discovery-Strategien:**
-- `HYBRID` (Default): SQL COUNT mit SDK Fallback
-- `COUNT_SQL`: Nur nativer SQL Count
-- `SDK_CURSOR`: Nur IBM SDK Counting
+- `SINGLE_PASS` (Default): Ein Cursor-Durchlauf, direktes Enqueue
+- `SDK_CURSOR`: Zwei Cursor-Pässe (Zählen + Enqueue)
+- Unbekannte Werte führen zu fail-fast (`IllegalArgumentException`)
 
 ---
 

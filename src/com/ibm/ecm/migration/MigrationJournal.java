@@ -42,11 +42,14 @@ public class MigrationJournal implements AutoCloseable {
     private final AtomicLong cacheMisses = new AtomicLong(0);
     private final AtomicLong cacheEvictions = new AtomicLong(0);
     
-    private final String baseDir;
+    private String baseDir;
     private final String dbUrlAppend;
 
+    // Fail-closed: first unrecoverable writer error, propagated on close.
+    private volatile Throwable writerFailure = null;
+
     // Async Journaling
-    private final BlockingQueue<JournalEntry> journalQueue = new LinkedBlockingQueue<>(100000);
+    private BlockingQueue<JournalEntry> journalQueue = new LinkedBlockingQueue<>(100000);
     private final AtomicBoolean running = new AtomicBoolean(false);
     private Thread writerThread;
 
@@ -109,6 +112,12 @@ public class MigrationJournal implements AutoCloseable {
         );
         
         logger.info("MigrationJournal created with LRU cache (maxSize={})", this.maxCacheSize);
+    }
+
+    // package-private: small queue for testing backpressure.
+    MigrationJournal(String baseDir, String dbUrlAppend, int maxCacheSize, int journalQueueSize) {
+        this(baseDir, dbUrlAppend, maxCacheSize);
+        this.journalQueue = new LinkedBlockingQueue<>(journalQueueSize);
     }
 
     public void init() throws SQLException {
@@ -191,7 +200,7 @@ public class MigrationJournal implements AutoCloseable {
                 }
             }
         } catch (SQLException e) {
-            logger.error("Error checking migration status for " + itemId, e);
+            throw new IllegalStateException("Journal read failure for item " + itemId, e);
         }
         return false;
     }
@@ -218,7 +227,7 @@ public class MigrationJournal implements AutoCloseable {
                 }
             }
         } catch (SQLException e) {
-            logger.error("Error checking deletion status for " + itemId, e);
+            throw new IllegalStateException("Journal read failure for item " + itemId, e);
         }
         return false;
     }
@@ -246,12 +255,19 @@ public class MigrationJournal implements AutoCloseable {
     }
 
     private void upsertStatus(String itemId, String itemType, String status, String checksum, String destItemId, String message) {
-        String cacheKey = itemType + ":" + itemId;
-        statusCache.put(cacheKey, status);
-
-        // Offload to background writer
-        if (!journalQueue.offer(new JournalEntry(itemId, itemType, status, checksum, destItemId, message))) {
-            logger.warn("Journal queue full! Dropping status update for {}. (Check H2 load)", itemId);
+        // Cache update deferred to writerLoop after DB write is confirmed.
+        // Offload to background writer — backpressure via put() with timeout.
+        JournalEntry entry = new JournalEntry(itemId, itemType, status, checksum, destItemId, message);
+        try {
+            if (!journalQueue.offer(entry, 5, TimeUnit.SECONDS)) {
+                writerFailure = new IllegalStateException(
+                    "Journal queue full: backpressure timeout for " + itemId);
+                throw new RuntimeException("Journal queue full, item not persisted: " + itemId, writerFailure);
+            }
+        } catch (InterruptedException e) {
+            writerFailure = e;
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Interrupted while queueing journal entry for " + itemId, e);
         }
     }
 
@@ -261,9 +277,15 @@ public class MigrationJournal implements AutoCloseable {
      */
     private void writerLoop() {
         java.util.List<JournalEntry> buffer = new java.util.ArrayList<>(1000);
-        while (running.get() || !journalQueue.isEmpty()) {
-            try {
-                JournalEntry first = journalQueue.poll(500, TimeUnit.MILLISECONDS);
+        try {
+            while (running.get() || !journalQueue.isEmpty()) {
+                JournalEntry first;
+                try {
+                    first = journalQueue.poll(500, TimeUnit.MILLISECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
                 if (first == null) continue;
 
                 buffer.add(first);
@@ -276,21 +298,36 @@ public class MigrationJournal implements AutoCloseable {
                 }
 
                 for (Map.Entry<String, java.util.List<JournalEntry>> group : byType.entrySet()) {
-                    writeBatchToDb(group.getKey(), group.getValue());
+                    if (!writeBatchToDb(group.getKey(), group.getValue())) {
+                        writerFailure = new IllegalStateException(
+                            "Journal batch write failed for itemType=" + group.getKey());
+                        drainLostEntries();
+                        return;
+                    }
+                    // Cache update only after confirmed DB write
+                    for (JournalEntry e : group.getValue()) {
+                        statusCache.put(e.itemType + ":" + e.itemId, e.status);
+                    }
                 }
 
                 buffer.clear();
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                break;
-            } catch (Exception e) {
-                logger.error("Error in JournalWriter loop", e);
             }
+        } catch (Exception e) {
+            writerFailure = e;
+            drainLostEntries();
         }
         logger.info("JournalWriter thread terminating.");
     }
 
-    private void writeBatchToDb(String itemType, java.util.List<JournalEntry> entries) {
+    private void drainLostEntries() {
+        java.util.List<JournalEntry> lost = new java.util.ArrayList<>();
+        journalQueue.drainTo(lost);
+        if (!lost.isEmpty()) {
+            logger.error("Journal writer failed. {} entries LOST.", lost.size());
+        }
+    }
+
+    private boolean writeBatchToDb(String itemType, java.util.List<JournalEntry> entries) {
         try (Connection conn = getConnection(itemType)) {
             conn.setAutoCommit(false);
             String sql = "MERGE INTO AUDIT_LOG (ITEM_ID, ITEM_TYPE, STATUS, CHECKSUM, DEST_ITEM_ID, MESSAGE, MIGRATION_TIME) " +
@@ -310,12 +347,15 @@ public class MigrationJournal implements AutoCloseable {
                 }
                 pstmt.executeBatch();
                 conn.commit();
+                return true;
             } catch (SQLException e) {
                 conn.rollback();
                 logger.error("Failed to write journal batch for " + itemType, e);
+                return false;
             }
         } catch (SQLException e) {
             logger.error("Could not get journal connection for " + itemType, e);
+            return false;
         }
     }
 
@@ -350,9 +390,9 @@ public class MigrationJournal implements AutoCloseable {
             }
             logger.info("Preloaded {} terminal entries (SUCCESS/DELETED) into cache for ItemType: {}", loaded, itemType);
         } catch (SQLException e) {
-            // Idempotenz-Marker zurücknehmen, damit ein erneuter Aufruf es noch einmal versuchen kann.
             preloadedItemTypes.remove(itemType);
-            logger.error("Error preloading cache for " + itemType, e);
+            writerFailure = e;
+            throw new IllegalStateException("Journal preload failed for " + itemType, e);
         }
         return loaded;
     }
@@ -368,6 +408,19 @@ public class MigrationJournal implements AutoCloseable {
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
+        }
+
+        if (writerFailure != null) {
+            logger.error("Journal writer failed. {} entries lost.", journalQueue.size());
+        }
+        if (!journalQueue.isEmpty()) {
+            logger.error("Journal close with {} unpersisted entries in queue.", journalQueue.size());
+        }
+        if (writerFailure != null || !journalQueue.isEmpty()) {
+            String msg = "Journal close failed: "
+                + (writerFailure != null ? "writer failure: " + writerFailure.getMessage() : "")
+                + (!journalQueue.isEmpty() ? " unpersisted entries: " + journalQueue.size() : "");
+            throw new IllegalStateException(msg, writerFailure);
         }
 
         logger.info("Journal Writer stopped. Cache size: " + statusCache.size() + " entries");
