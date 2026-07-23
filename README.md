@@ -159,6 +159,7 @@ Mit statischem Monitor:
 |---|---|
 | Hilfe/Modi | `./bin/cm-run.sh --help` |
 | Build | `bash bin/compile.sh` |
+| Passwort-Codierung | `./bin/cm-password.sh encode\|decode` |
 | Sicherer Gesamtworkflow | `./bin/cm-run.sh safe conf/migration.properties` |
 | Migration | `./bin/cm-run.sh migration conf/migration.properties` |
 | Verifikation | `./bin/cm-run.sh verification conf/migration.properties` |
@@ -203,7 +204,8 @@ bash tests/test-tracked-config-hygiene.sh
 bash tests/test-run-lifecycle.sh
 bash tests/test-verifier-runtime-safety.sh
 bash tests/test-webgui-run-snapshot-security.sh
-```
+bash tests/test-cm-password.sh
+bash bin/compile.sh
 
 `.github/workflows/test.yml` führt Shell-Syntax, `git diff --check` und alle IBM-unabhängigen Tests mit Java 17 aus. Der Hosted Runner materialisiert `lib/` nicht. `test-verifier-source-lookup-decision.sh` und `bin/compile.sh` benötigen die lokalen IBM-/Third-Party-Libraries und bleiben daher ein lokales beziehungsweise privates Gate; CI täuscht dafür keinen grünen Build vor.
 

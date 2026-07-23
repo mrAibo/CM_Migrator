@@ -415,6 +415,7 @@ chmod 700 data logs reports debug_mail 2>/dev/null || true
 
 - keine produktiven Configs, Journale, Logs, Reports oder Run-Snapshots committen;
 - `_PASSWORD_CRYPT` als reversible Legacy-Kodierung behandeln, nicht als Verschlüsselung;
+- Für die Erzeugung von `_CRYPT`-Werten steht `bin/cm-password.sh encode` bereit (Base64→reverse→Base64);
 - Credentials regelmäßig rotieren und nach Incident/Repo-Leak sofort ersetzen;
 - Backups verschlüsseln, Zugriff protokollieren und Restore-Rechte prüfen;
 - WebGUI-Admin-Passwort nicht als Kommandozeilenargument verwenden;
@@ -920,6 +921,7 @@ bash tests/test-tracked-config-hygiene.sh
 bash tests/test-run-lifecycle.sh
 bash tests/test-verifier-runtime-safety.sh
 bash tests/test-webgui-run-snapshot-security.sh
+bash tests/test-cm-password.sh
 bash bin/compile.sh
 git diff --check
 ```
@@ -937,8 +939,9 @@ Einordnung:
 | `test-tracked-config-hygiene.sh` | dependency-freier Tracking-/Vorlagen-Regressionstest |
 | `test-run-lifecycle.sh` | lokaler Shell-Test der Run-Lifecycle-Eigenschaften |
 | `test-verifier-runtime-safety.sh` | lokaler Shell-Test der Verifier-Runtime-Safety |
-| `test-webgui-run-snapshot-security.sh` | lokaler Shell-Test der WebGUI-Run-Snapshot-Sicherheit |
-| `bin/compile.sh` | lokaler Java-Compile-/JAR-Build mit vorhandenen freigegebenen Libraries |
+|| `test-webgui-run-snapshot-security.sh` | lokaler Shell-Test der WebGUI-Run-Snapshot-Sicherheit |
+|| `test-cm-password.sh` | lokaler Shell-Test der Passwort-Codierung (Roundtrip, Sonderzeichen, Unicode) |
+|| `bin/compile.sh` | lokaler Java-Compile-/JAR-Build mit vorhandenen freigegebenen Libraries |
 
 `.github/workflows/test.yml` verwendet minimale Read-only-Rechte, Ubuntu und Temurin 17. Ein Sparse-Checkout materialisiert `lib/` nicht. CI führt Shell-Syntax, `git diff --check` und alle IBM-unabhängigen Tests aus. `test-verifier-source-lookup-decision.sh` und der Gesamtbuild bleiben wegen IBM-SDK-/JNI-/Lizenzabhängigkeit ein lokales beziehungsweise privates Gate; es wird kein grüner Hosted-CI-Build vorgetäuscht.
 
