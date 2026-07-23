@@ -18,7 +18,6 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 
 public class ReportDataCollector {
 
@@ -52,7 +51,6 @@ public class ReportDataCollector {
             : 100.0;
 
         OperationType opType = OperationType.fromMode(config.getOperationMode());
-        OverallStatus status = computeStatus(stats.getFailedItems(), stats.getSkippedItems());
 
         List<ItemTypeResult> itemTypes = new ArrayList<>();
         List<ReportError>    allErrors = new ArrayList<>();
@@ -68,8 +66,14 @@ public class ReportDataCollector {
             }
         }
 
+        // Compute status AFTER collecting item types (needs verification data)
+        OverallStatus status = computeStatus(stats, itemTypes);
+
+        // Stable operation ID based on start time (not UUID)
+        String operationId = generateOperationId(opType, stats.getStartTime());
+
         return new UnifiedReport(
-            UUID.randomUUID().toString().substring(0, 8).toUpperCase(),
+            operationId,
             opType, status,
             stats.getStartTime(), endTimeMs,
             config.getSourceSSID(), config.getDestSSID(),
@@ -118,7 +122,7 @@ public class ReportDataCollector {
                 }
             }
 
-            // -- error details (capped) --------------------------------------
+            // -- error details from AUDIT_LOG (capped) ----------------------
             List<ReportError> itemErrors = new ArrayList<>();
             String errSql =
                 "SELECT ITEM_ID, STATUS, MESSAGE, MIGRATION_TIME FROM AUDIT_LOG" +
@@ -168,6 +172,36 @@ public class ReportDataCollector {
                 } catch (SQLException e) {
                     logger.debug("VERIFICATION_LOG query failed for {}: {}", sourceType, e.getMessage());
                 }
+
+                // -- verification error details (issue 3) -------------------
+                if (verified >= 0 && (mismatches > 0 || orphaned > 0)) {
+                    String detailSql =
+                        "SELECT ITEM_ID, STATUS, MESSAGE, VERIFIED_AT FROM VERIFICATION_LOG" +
+                        " WHERE STATUS IN ('MISMATCH', 'ORPHANED')" +
+                        " ORDER BY VERIFIED_AT DESC LIMIT " + MAX_ERRORS_PER_TYPE;
+                    try (PreparedStatement ps = conn.prepareStatement(detailSql)) {
+                        try (ResultSet rs = ps.executeQuery()) {
+                            while (rs.next()) {
+                                ReportError verErr = new ReportError(
+                                    sourceType,
+                                    rs.getString("ITEM_ID"),
+                                    rs.getString("STATUS"),
+                                    rs.getString("MESSAGE"),
+                                    rs.getString("VERIFIED_AT")
+                                );
+                                if (itemErrors.size() < MAX_ERRORS_PER_TYPE) {
+                                    itemErrors.add(verErr);
+                                }
+                                if (globalErrors.size() < MAX_ERRORS_GLOBAL) {
+                                    globalErrors.add(verErr);
+                                }
+                            }
+                        }
+                    } catch (SQLException e) {
+                        logger.debug("VERIFICATION_LOG detail query failed for {}: {}",
+                            sourceType, e.getMessage());
+                    }
+                }
             }
 
             return new ItemTypeResult(
@@ -188,10 +222,28 @@ public class ReportDataCollector {
         }
     }
 
-    private static OverallStatus computeStatus(long failed, long skipped) {
-        if (failed > 0) return OverallStatus.FAILED;
-        // ponytail: treat all-skipped as warning so operator can investigate
-        if (skipped > 0) return OverallStatus.WARNING;
+    /** Computes overall status using both live stats and verification data. */
+    private static OverallStatus computeStatus(MigrationStats stats, List<ItemTypeResult> itemTypes) {
+        if (stats.getFailedItems() > 0) return OverallStatus.FAILED;
+        for (ItemTypeResult it : itemTypes) {
+            if (it.mismatches() > 0) return OverallStatus.FAILED;
+        }
+        // ponytail: orphaned items are WARNING only when nothing else failed
+        for (ItemTypeResult it : itemTypes) {
+            if (it.orphaned() > 0) return OverallStatus.WARNING;
+        }
         return OverallStatus.SUCCESS;
+    }
+
+    /** Stable, sortable operation ID: PREFIX_yyyyMMdd_HHmmss. */
+    private static String generateOperationId(OperationType opType, long startTimeMs) {
+        String prefix;
+        switch (opType) {
+            case VERIFICATION: prefix = "VER_"; break;
+            case DELETE:       prefix = "DEL_"; break;
+            default:           prefix = "MIG_"; break;  // MIGRATION, RESUME, SINGLE_PASS
+        }
+        java.text.SimpleDateFormat fmt = new java.text.SimpleDateFormat("yyyyMMdd_HHmmss");
+        return prefix + fmt.format(new java.util.Date(startTimeMs));
     }
 }

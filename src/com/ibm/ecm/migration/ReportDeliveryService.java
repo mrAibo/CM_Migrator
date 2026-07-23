@@ -14,15 +14,31 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 /**
- * Writes report.html + optional errors.csv to reports/{operationId}/,
- * then sends email via mutt (preferred) or mailx (fallback).
+ * Writes report.html + optional errors.csv to {REPORT_OUTPUT_DIR}/{operationId}/,
+ * then sends email via mutt (preferred) or mailx (body-only fallback).
  */
 public class ReportDeliveryService {
     private static final Logger logger = LogManager.getLogger(ReportDeliveryService.class);
 
     public static DeliveryResult deliver(UnifiedReport report, MigrationConfig config) {
-        // 1. Create output directory
-        String dir = "reports" + File.separator + report.operationId();
+        // 0. Check REPORT_ENABLED (issue 10)
+        if ("false".equalsIgnoreCase(config.getProperty("REPORT_ENABLED", "true"))) {
+            logger.info("REPORT_ENABLED=false — skipping report generation and email.");
+            return new DeliveryResult(false, false, "none",
+                    "REPORT_ENABLED=false", null);
+        }
+
+        // 1. Determine output dir from config (issue 5)
+        String outputDir = config.getProperty("REPORT_OUTPUT_DIR", "reports");
+        String baseDir = outputDir + File.separator + report.operationId();
+
+        // Directory collision handling (issue 12)
+        String dir = baseDir;
+        int collision = 1;
+        while (new File(dir).exists()) {
+            collision++;
+            dir = outputDir + File.separator + report.operationId() + "_" + collision;
+        }
         new File(dir).mkdirs();
         String reportPath = new File(dir, "report.html").getAbsolutePath();
 
@@ -37,7 +53,9 @@ public class ReportDeliveryService {
         }
         logger.info("Report written to {}", reportPath);
 
-        // 3. Write errors.csv (only if there are actual errors)
+        // 3. Write errors.csv (configurable — issue 8)
+        boolean csvEnabled = !"false".equalsIgnoreCase(
+                config.getProperty("REPORT_ERROR_CSV", "true"));
         List<ReportError> allErrors = new ArrayList<>(report.errors());
         boolean hasMismatches = false;
         for (ItemTypeResult it : report.itemTypes()) {
@@ -49,7 +67,7 @@ public class ReportDeliveryService {
         boolean hasErrors = !allErrors.isEmpty() || hasMismatches;
 
         String errorsCsvPath = null;
-        if (hasErrors && !allErrors.isEmpty()) {
+        if (csvEnabled && hasErrors && !allErrors.isEmpty()) {
             errorsCsvPath = new File(dir, "errors.csv").getAbsolutePath();
             try (PrintWriter w = new PrintWriter(
                     new FileOutputStream(errorsCsvPath), false, StandardCharsets.UTF_8)) {
@@ -73,13 +91,15 @@ public class ReportDeliveryService {
         String emailTo = config.getEmailTo();
         if (emailTo == null || emailTo.trim().isEmpty()) {
             logger.info("No EMAIL_TO configured — skipping email delivery.");
-            return new DeliveryResult(false, false, "none", null, reportPath);
+            return new DeliveryResult(false, false, "none",
+                    "No EMAIL_TO configured", reportPath);  // issue 11: errorMessage not null
         }
 
         emailTo = emailTo.trim();
         boolean debugMail = "true".equalsIgnoreCase(
                 config.getProperty("REPORT_DEBUG_MAIL", "false"));
 
+        // Debug mail: dump then CONTINUE to send (issue 6)
         if (debugMail) {
             File debugDir = new File("debug_mail");
             debugDir.mkdirs();
@@ -92,32 +112,46 @@ public class ReportDeliveryService {
             } catch (Exception ex) {
                 logger.warn("DEBUG dump failed: {}", ex.getMessage());
             }
-            return new DeliveryResult(false, false, "none", null, reportPath);
+            // ponytail: continue to send after debug dump — no early return
         }
 
         String subject = ReportRenderer.emailSubject(report);
         String htmlBody = ReportRenderer.renderEmailBody(report);
 
+        // Attachments — configurable (issue 7)
+        boolean attachEnabled = !"false".equalsIgnoreCase(
+                config.getProperty("REPORT_ATTACH", "true"));
         List<String> attachments = new ArrayList<>();
-        attachments.add(reportPath);
-        if (errorsCsvPath != null) {
-            attachments.add(errorsCsvPath);
+        if (attachEnabled) {
+            attachments.add(reportPath);
+            if (errorsCsvPath != null) {
+                attachments.add(errorsCsvPath);
+            }
         }
 
         String transport = detectMailCommand();
         if (transport == null) {
             logger.error("Neither mutt nor mailx found. Cannot send email.");
-            return new DeliveryResult(false, hasErrors && errorsCsvPath != null,
-                    "none", "No mail command (mutt/mailx) found on system", reportPath);
+            return new DeliveryResult(false, false, "none",
+                    "No mail command found on system", reportPath);  // issue 11
         }
 
         try {
-            boolean ok = sendWith(transport, emailTo, subject, htmlBody, attachments);
-            return new DeliveryResult(ok, true, transport,
-                    ok ? null : "Email send returned non-zero exit code", reportPath);
+            boolean sent;
+            boolean attIncluded;
+            if ("mailx".equals(transport)) {
+                // mailx: body-only, attachments unreliable (issue 9)
+                sent = sendWith(transport, emailTo, subject, htmlBody, List.of());
+                attIncluded = false;
+            } else {
+                sent = sendWith(transport, emailTo, subject, htmlBody, attachments);
+                attIncluded = attachEnabled;
+            }
+            return new DeliveryResult(sent, attIncluded, transport,
+                    sent ? null : "Email send returned non-zero exit code", reportPath);
         } catch (Exception e) {
             logger.error("Email delivery failed: {}", e.getMessage(), e);
-            return new DeliveryResult(false, true, transport,
+            return new DeliveryResult(false, false, transport,
                     "Email delivery exception: " + e.getMessage(), reportPath);
         }
     }
@@ -139,7 +173,7 @@ public class ReportDeliveryService {
             }
             cmd.add("--");
             cmd.add(to);
-        } else { // mailx
+        } else { // mailx — body-only, no file attachments
             cmd.add("mailx");
             cmd.add("-a");
             cmd.add("Content-Type: text/html; charset=UTF-8");

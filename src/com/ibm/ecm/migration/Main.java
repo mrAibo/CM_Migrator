@@ -226,9 +226,9 @@ public class Main {
                         UnifiedReport report = collector.collect();
                         DeliveryResult result = ReportDeliveryService.deliver(report, config);
                         logger.info("Report delivered: path={}, sent={}, transport={}",
-                                result.reportPath, result.sent, result.transport);
-                        if (result.errorMessage != null) {
-                            logger.error("Report delivery issue: {}", result.errorMessage);
+                                result.reportPath(), result.sent(), result.transport());
+                        if (result.errorMessage() != null) {
+                            logger.error("Report delivery issue: {}", result.errorMessage());
                         }
                     } else {
                         logger.info("REPORT_ENABLED=false — skipping unified report generation.");
