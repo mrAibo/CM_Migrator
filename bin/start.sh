@@ -39,6 +39,15 @@ if [ -t 1 ]; then  # stdout is a terminal (where dashboard renders)
     fi
 fi
 
+# ── Pretty-mode: file-only log4j2 config ──────────────────────────
+if [ "${CM_CONSOLE_MODE:-}" = "pretty" ]; then
+    PRETTY_CONFIG="$(pwd)/conf/log4j2-pretty.xml"
+    if [ -f "$PRETTY_CONFIG" ]; then
+        JAVA_OPTS="$JAVA_OPTS -Dlog4j.configurationFile=$PRETTY_CONFIG"
+        echo "Log4j2: pretty mode (file-only)"
+    fi
+fi
+
 # 2. Library Path
 CM_LIB_PATH="/opt/IBM/cm87_api/lib"
 if [ -d "$CM_LIB_PATH" ]; then

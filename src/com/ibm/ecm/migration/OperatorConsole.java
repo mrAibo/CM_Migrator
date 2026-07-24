@@ -326,7 +326,7 @@ public final class OperatorConsole {
             StringBuilder line = new StringBuilder();
             line.append(" Journal: ").append(journalHealthStr(s.journalHealth));
             line.append("  queue=").append(fmt(s.journalQueueDepth)).append('/').append(fmt(s.journalQueueCapacity));
-            line.append("  persisted=").append(s.journalPersisted >= 0 ? fmt(s.journalPersisted) : c(ConsoleUI.DIM) + "n/a" + r());
+            line.append("  committed=").append(s.journalPersisted >= 0 ? fmt(s.journalPersisted) : c(ConsoleUI.DIM) + "n/a" + r());
             if (s.journalError != null && !s.journalError.isEmpty())
                 line.append(' ').append(c(ConsoleUI.RED)).append(trunc(s.journalError, 20)).append(r());
             appendRow(out, boxV, line.toString(), IW, boxV);
@@ -480,7 +480,7 @@ public final class OperatorConsole {
 
         out.append("journal=").append(journalHealthStrPlain(s.journalHealth));
         out.append(" jq=").append(fmt(s.journalQueueDepth)).append('/').append(fmt(s.journalQueueCapacity));
-        out.append(" persisted=").append(s.journalPersisted >= 0 ? fmt(s.journalPersisted) : "n/a").append('\n');
+        out.append(" committed=").append(s.journalPersisted >= 0 ? fmt(s.journalPersisted) : "n/a").append('\n');
 
         out.append("pool_src=").append(s.poolSourceLatencyMs != null ? s.poolSourceLatencyMs + "ms" : "n/a");
         out.append(" pool_dst=").append(s.poolDestLatencyMs != null ? s.poolDestLatencyMs + "ms" : "n/a");
@@ -515,7 +515,7 @@ public final class OperatorConsole {
         out.append(" queueDepth=").append(s.queueDepth);
         out.append(" queueCapacity=").append(s.queueCapacity);
         out.append(" journalQ=").append(s.journalQueueDepth).append('/').append(s.journalQueueCapacity);
-        out.append(" persisted=").append(s.journalPersisted >= 0 ? s.journalPersisted : -1);
+        out.append(" committed=").append(s.journalPersisted >= 0 ? s.journalPersisted : -1);
         out.append(" jHealth=").append(journalHealthStrPlain(s.journalHealth));
         out.append(" workers=").append(s.configuredWorkers);
         out.append(" lastProgressMs=").append(s.lastProgressMs);
