@@ -1,10 +1,7 @@
 /*
  * Projekt: CM Migrator 2.2.1.
- * @Author: Aleksej Voronin, Sven Lindt
- * @Date:   23.07.2026
- *
- * Sole console renderer. Box-drawing dashboard (pretty mode) or
- * single-line key=value output (plain mode). Dependency-free.
+ * Sole console renderer with reliable terminal-width detection
+ * and auto-wrap prevention (outerWidth ≤ terminalWidth - 2).
  */
 package com.ibm.ecm.migration;
 
@@ -38,10 +35,37 @@ public final class OperatorConsole {
         if (NO_COLOR) ConsoleUI.setColorsEnabled(false);
     }
 
+    // ── Terminal width resolution ─────────────────────────────────────
+
+    /**
+     * Priority:
+     * 1. System property cm.migrator.console.columns
+     * 2. Environment COLUMNS
+     * 3. Conservative fallback: 79 (safe for default terminals)
+     */
     static int terminalWidth() {
+        // 1. System property
+        String prop = System.getProperty("cm.migrator.console.columns");
+        if (prop != null) {
+            try { int w = Integer.parseInt(prop.trim()); if (w > 0) return w; }
+            catch (NumberFormatException ignored) {}
+        }
+        // 2. Environment
         String cols = System.getenv("COLUMNS");
-        if (cols != null) try { return Integer.parseInt(cols); } catch (NumberFormatException ignored) {}
-        return 100;
+        if (cols != null) {
+            try { int w = Integer.parseInt(cols); if (w > 0) return w; }
+            catch (NumberFormatException ignored) {}
+        }
+        // 3. Conservative default (safe for most SSH sessions)
+        return 79;
+    }
+
+    /** Outer width of current layout (including borders). */
+    static int outerWidth() {
+        int tw = terminalWidth();
+        if (tw >= 66) return 64;
+        if (tw >= 54) return 52;
+        return Math.max(1, tw - 2);  // ponytail: never 0 or negative
     }
 
     // ── Data snapshot ─────────────────────────────────────────────────
@@ -109,7 +133,6 @@ public final class OperatorConsole {
 
     // ── Box-drawing: appendRow / truncateVisible ──────────────────────
 
-    /** Append a left-border + padded content + right-border + newline. ANSI-safe. */
     static void appendRow(StringBuilder out, String leftBorder, String content,
                           int innerWidth, String rightBorder) {
         String visible = truncateVisible(content, innerWidth);
@@ -120,6 +143,10 @@ public final class OperatorConsole {
         out.append(c(ConsoleUI.BRIGHT_CYAN)).append(rightBorder).append(r()).append('\n');
     }
 
+    /**
+     * Truncate to maxLen visible characters, preserving ANSI structure.
+     * If truncation leaves an unclosed ANSI escape, appends RESET.
+     */
     static String truncateVisible(String s, int maxLen) {
         if (s == null || maxLen < 0) return "";
         StringBuilder sb = new StringBuilder();
@@ -139,6 +166,8 @@ public final class OperatorConsole {
             }
             sb.append(c); visible++;
         }
+        // Close any unclosed ANSI sequence
+        if (inEsc || inCsi) sb.append(ConsoleUI.RESET);
         return sb.toString();
     }
 
@@ -170,10 +199,10 @@ public final class OperatorConsole {
             buf.append('\r');
         }
 
-        int w = terminalWidth();
-        if (w < 80)      renderStacked(s, buf, w);
-        else if (w < 100) renderCompact(s, buf);
-        else             render(s, buf);
+        int tw = terminalWidth();
+        if (tw >= 66)      render(s, buf);
+        else if (tw >= 54) renderCompact(s, buf);
+        else               renderStacked(s, buf, Math.max(1, tw - 2));
 
         if (buf.length() == 0 || buf.charAt(buf.length() - 1) != '\n') buf.append('\n');
 
@@ -193,10 +222,10 @@ public final class OperatorConsole {
         lastLineCount = 0;
     }
 
-    // ── Pretty mode: full width (≥100 cols) ──────────────────────────
+    // ── Pretty mode: full width (≥66 cols, outer 64, inner 62) ────────
 
     static void render(Snapshot s, StringBuilder out) {
-        final int IW = 62;  // inner width
+        final int IW = 62;
         String hSep = repeat(box("═", "-"), IW);
         String boxV = box("║", "|");
         boolean knownTotal = s.total > 0;
@@ -268,8 +297,13 @@ public final class OperatorConsole {
         // Speed / ETA / Elapsed
         {
             StringBuilder line = new StringBuilder();
+            boolean running = s.state == RunState.RUNNING;
             line.append(c(ConsoleUI.YELLOW)).append(ConsoleUI.ICON_SPEED).append(r());
-            line.append(' ').append(String.format(java.util.Locale.ROOT, "%.1f", s.currentRate)).append(" it/s");
+            if (running) {
+                line.append(' ').append(String.format(java.util.Locale.ROOT, "%.1f", s.currentRate)).append(" it/s");
+            } else {
+                line.append(" stopped");
+            }
             line.append(" (avg ").append(String.format(java.util.Locale.ROOT, "%.1f", s.averageRate)).append(')');
             line.append("  ").append(c(ConsoleUI.CYAN)).append(ConsoleUI.ICON_CLOCK).append(r());
             line.append(" ETA: ").append(s.eta);
@@ -326,7 +360,7 @@ public final class OperatorConsole {
         out.append(c(ConsoleUI.BRIGHT_CYAN)).append(box("╚","+")).append(hSep).append(box("╝","+")).append(r()).append('\n');
     }
 
-    // ── Compact mode (80-99 cols, inner width 50) ────────────────────
+    // ── Compact mode (54-65 cols, outer 52, inner 50) ─────────────────
 
     static void renderCompact(Snapshot s, StringBuilder out) {
         final int IW = 50;
@@ -372,8 +406,13 @@ public final class OperatorConsole {
 
         {
             StringBuilder line = new StringBuilder();
+            boolean running = s.state == RunState.RUNNING;
             line.append(' ').append(c(ConsoleUI.YELLOW)).append(ConsoleUI.ICON_SPEED).append(r());
-            line.append(' ').append(String.format(java.util.Locale.ROOT, "%.1f", s.currentRate)).append("/s");
+            if (running) {
+                line.append(' ').append(String.format(java.util.Locale.ROOT, "%.1f", s.currentRate)).append("/s");
+            } else {
+                line.append(" stopped");
+            }
             line.append(" ETA:").append(s.eta);
             appendRow(out, boxV, line.toString(), IW, boxV);
         }
@@ -399,11 +438,12 @@ public final class OperatorConsole {
         out.append(c(ConsoleUI.BRIGHT_CYAN)).append(box("╚","+")).append(hSep).append(box("╝","+")).append('\n');
     }
 
-    // ── Stacked mode (<80 cols, no box, width ≤ terminal) ────────────
+    // ── Stacked mode (<54 cols, no box, width ≤ terminal - 2) ─────────
 
     static void renderStacked(Snapshot s, StringBuilder out, int maxWidth) {
         boolean knownTotal = s.total > 0;
         double pct = knownTotal ? Math.min(100.0, Math.max(0.0, (double) s.processed / s.total * 100.0)) : 0.0;
+        boolean running = s.state == RunState.RUNNING;
 
         out.append(c(ConsoleUI.BOLD)).append("── CM Migrator v").append(VERSION).append(' ');
         out.append(stateBadge(s)).append(' ').append(c(ConsoleUI.DIM)).append(timestamp()).append(r()).append('\n');
@@ -429,8 +469,10 @@ public final class OperatorConsole {
         out.append("success=").append(fmt(s.success)).append(" failed=").append(fmt(s.failed));
         out.append(" skipped=").append(fmt(s.skipped)).append(" deleted=").append(fmt(s.deleted)).append('\n');
 
-        out.append("speed=").append(String.format(java.util.Locale.ROOT, "%.1f", s.currentRate));
-        out.append("/s (avg ").append(String.format(java.util.Locale.ROOT, "%.1f", s.averageRate)).append(")");
+        out.append("speed=");
+        if (running) out.append(String.format(java.util.Locale.ROOT, "%.1f", s.currentRate)).append("/s");
+        else out.append("stopped");
+        out.append(" (avg ").append(String.format(java.util.Locale.ROOT, "%.1f", s.averageRate)).append(")");
         out.append(" ETA=").append(s.eta).append(" elapsed=").append(fmtDuration(s.elapsedMs)).append('\n');
 
         out.append("queue=").append(fmt(s.queueDepth)).append('/').append(fmt(s.queueCapacity));
@@ -480,7 +522,7 @@ public final class OperatorConsole {
         out.append(" streaming=").append(s.streaming);
     }
 
-    // ── Helpers (unchanged from original) ─────────────────────────────
+    // ── Helpers ────────────────────────────────────────────────────────
 
     private static String c(String code)   { return ConsoleUI.c(code); }
     private static String r()              { return ConsoleUI.RESET; }
@@ -488,7 +530,6 @@ public final class OperatorConsole {
     private static String repeat(String s, int n) { return ConsoleUI.repeat(s, n); }
     private static String fmt(long n)      { return String.format("%,d", n).replace(',', '.'); }
     private static String fmtPct(double p) { return String.format("%5.1f%%", p); }
-    private static String pad(int n)       { return repeat(" ", n); }
     private static String trunc(String s, int len) { return s != null && s.length() > len ? s.substring(0, len) : (s != null ? s : ""); }
     private static String sanitize(String s){ return s != null ? s.replace("\n", " ").replace("\r", "") : ""; }
     private static String timestamp() { return java.time.LocalTime.now().format(java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss")); }
@@ -511,8 +552,6 @@ public final class OperatorConsole {
         String m = s.state == null ? RunState.RUNNING.toString() : s.state.toString();
         return c(ConsoleUI.CYAN) + m + r();
     }
-    private static int badgeLen(Snapshot s) { return (s.mode != null ? s.mode : "MIGRATE").length(); }
-    private static int stateBadgeLen(Snapshot s) { return (s.state != null ? s.state : RunState.RUNNING).toString().length(); }
     private static String phaseStr(Phase p) {
         if (p == null) return "?";
         String n = p.toString().replace('_', ' ').toLowerCase();
