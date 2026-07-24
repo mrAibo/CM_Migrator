@@ -12,37 +12,38 @@ public class ReportRenderer {
     private static final String VERSION = OperatorConsole.VERSION;
 
     // ---- embedded CSS (offline-safe) ----
-    private static final String CSS = """
-            <style>
-            body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;
-              background:#f8fafc;color:#1e293b;margin:0;padding:20px;line-height:1.5}
-            .container{max-width:1000px;margin:0 auto;background:#fff;border:1px solid #e2e8f0;
-              border-radius:8px;overflow:hidden}
-            .head{padding:24px 30px;background:#0f172a;color:#fff}
-            .head h1{margin:0;font-size:1.4rem;font-weight:600}
-            .head .sub{font-size:.8rem;color:#94a3b8;margin-top:4px}
-            .badge{display:inline-block;padding:3px 12px;border-radius:99px;font-size:.75rem;
-              font-weight:700;letter-spacing:1px}
-            .badge.ok{background:#dcfce7;color:#166534}
-            .badge.err{background:#fef2f2;color:#991b1b}
-            .badge.warn{background:#fffbeb;color:#92400e}
-            .kpis{display:flex;flex-wrap:wrap;gap:1px;background:#e2e8f0;border-bottom:3px solid #f97316}
-            .kpi{flex:1 1 130px;background:#fff;padding:18px 14px;text-align:center}
-            .kpi .v{font-size:1.6rem;font-weight:700}
-            .kpi .l{font-size:.65rem;color:#64748b;text-transform:uppercase;letter-spacing:1px;margin-top:4px}
-            .section{padding:20px 30px}
-            .section h2{font-size:1rem;border-bottom:2px solid #e2e8f0;padding-bottom:6px;margin-bottom:12px}
-            table{width:100%;border-collapse:collapse;font-size:.85rem}
-            th,td{padding:8px 10px;text-align:left;border-bottom:1px solid #e2e8f0}
-            th{background:#f1f5f9;font-weight:600;text-transform:uppercase;font-size:.7rem;letter-spacing:.5px}
-            .card{border:1px solid #e2e8f0;border-radius:6px;margin-bottom:12px}
-            .card-head{padding:10px 16px;background:#f8fafc;font-weight:600;border-bottom:1px solid #e2e8f0}
-            .card-body{padding:12px 16px;display:flex;flex-wrap:wrap;gap:16px}
-            .card-body .stat{flex:0 0 auto}
-            .card-body .stat .v{font-size:1.1rem;font-weight:700}
-            .card-body .stat .l{font-size:.6rem;color:#64748b}
-            .err{color:#dc2626}.ok{color:#16a34a}.warn{color:#f59e0b}.muted{color:#94a3b8}
-            </style>""";
+    // ponytail: concatenation instead of text block for JDK 11 compatibility
+    private static final String CSS = "\n"
+            + "<style>\n"
+            + "body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;\n"
+            + "  background:#f8fafc;color:#1e293b;margin:0;padding:20px;line-height:1.5}\n"
+            + ".container{max-width:1000px;margin:0 auto;background:#fff;border:1px solid #e2e8f0;\n"
+            + "  border-radius:8px;overflow:hidden}\n"
+            + ".head{padding:24px 30px;background:#0f172a;color:#fff}\n"
+            + ".head h1{margin:0;font-size:1.4rem;font-weight:600}\n"
+            + ".head .sub{font-size:.8rem;color:#94a3b8;margin-top:4px}\n"
+            + ".badge{display:inline-block;padding:3px 12px;border-radius:99px;font-size:.75rem;\n"
+            + "  font-weight:700;letter-spacing:1px}\n"
+            + ".badge.ok{background:#dcfce7;color:#166534}\n"
+            + ".badge.err{background:#fef2f2;color:#991b1b}\n"
+            + ".badge.warn{background:#fffbeb;color:#92400e}\n"
+            + ".kpis{display:flex;flex-wrap:wrap;gap:1px;background:#e2e8f0;border-bottom:3px solid #f97316}\n"
+            + ".kpi{flex:1 1 130px;background:#fff;padding:18px 14px;text-align:center}\n"
+            + ".kpi .v{font-size:1.6rem;font-weight:700}\n"
+            + ".kpi .l{font-size:.65rem;color:#64748b;text-transform:uppercase;letter-spacing:1px;margin-top:4px}\n"
+            + ".section{padding:20px 30px}\n"
+            + ".section h2{font-size:1rem;border-bottom:2px solid #e2e8f0;padding-bottom:6px;margin-bottom:12px}\n"
+            + "table{width:100%;border-collapse:collapse;font-size:.85rem}\n"
+            + "th,td{padding:8px 10px;text-align:left;border-bottom:1px solid #e2e8f0}\n"
+            + "th{background:#f1f5f9;font-weight:600;text-transform:uppercase;font-size:.7rem;letter-spacing:.5px}\n"
+            + ".card{border:1px solid #e2e8f0;border-radius:6px;margin-bottom:12px}\n"
+            + ".card-head{padding:10px 16px;background:#f8fafc;font-weight:600;border-bottom:1px solid #e2e8f0}\n"
+            + ".card-body{padding:12px 16px;display:flex;flex-wrap:wrap;gap:16px}\n"
+            + ".card-body .stat{flex:0 0 auto}\n"
+            + ".card-body .stat .v{font-size:1.1rem;font-weight:700}\n"
+            + ".card-body .stat .l{font-size:.6rem;color:#64748b}\n"
+            + ".err{color:#dc2626}.ok{color:#16a34a}.warn{color:#f59e0b}.muted{color:#94a3b8}\n"
+            + "</style>";
 
     private static final String PAGE_TOP = "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"UTF-8\">"
             + "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"

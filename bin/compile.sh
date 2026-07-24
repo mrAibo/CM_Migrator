@@ -32,6 +32,9 @@ if ! "$JAVAC_CMD" -version &>/dev/null; then
     exit 1
 fi
 
+echo "Java compiler version:"
+"$JAVAC_CMD" -version 2>&1 || true
+
 # 2. Source file validation
 SRC_DIR="src/com/ibm/ecm/migration"
 if [ ! -d "$SRC_DIR" ]; then
@@ -72,7 +75,7 @@ echo "---------------------------------------------"
 
 # Capture compilation output
 COMPILE_LOG="compile.log"
-if "$JAVAC_CMD" -d target -cp "$CP" -Xlint:deprecation -Xlint:unchecked \
+if "$JAVAC_CMD" --release 11 -d target -cp "$CP" -Xlint:deprecation -Xlint:unchecked \
     $(find "$SRC_DIR" -name "*.java") 2>&1 | tee "$COMPILE_LOG"; then
     
     # Check if any class files were generated

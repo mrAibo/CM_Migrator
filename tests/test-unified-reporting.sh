@@ -9,6 +9,12 @@ trap 'rm -rf "$work_dir"' EXIT
 javac_cmd="${JAVAC_CMD:-javac}"
 java_cmd="${JAVA_CMD:-java}"
 
+# Detect local JDK 11 (same as compile.sh)
+if [ -f "java_env/jdk-11.0.2/bin/javac" ]; then
+    javac_cmd="java_env/jdk-11.0.2/bin/javac"
+    java_cmd="java_env/jdk-11.0.2/bin/java"
+fi
+
 echo "=== UnifiedReportingTest ==="
 
 # --- Create fake mail transport executables ---
