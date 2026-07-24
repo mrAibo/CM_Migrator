@@ -405,17 +405,15 @@ public class Verifier {
 
             consoleLogger.info("Verification Finished.");
             
-            logger.info("Generating Verification Report...");
-            
-            // v1.31 Perf: Convert Atomic stats back to int[] for ReportGenerator
-            Map<String, int[]> typeResults = new java.util.HashMap<>();
-            typeResultsAtomic.forEach((k, v) -> {
-                int[] arr = new int[5];
-                for(int i=0; i<5; i++) arr[i] = v.get(i);
-                typeResults.put(k, arr);
-            });
-            
-            ReportGenerator.generateVerificationReport(config, stats, typeResults);
+            logger.info("Generating Verification Report via unified pipeline...");
+
+            try {
+                ReportDataCollector collector = new ReportDataCollector(stats, config);
+                UnifiedReport report = collector.collect();
+                ReportDeliveryService.deliver(report, config);
+            } catch (Exception e) {
+                logger.error("Verification report delivery failed: {}", e.getMessage(), e);
+            }
 
             // Round 9A: optionaler Non-OK-CSV-Export pro ItemType — read-only, keine Datenmutation.
             try {
@@ -424,29 +422,7 @@ public class Verifier {
                 logger.warn("Round 9A non-OK CSV export failed: {}", e.getMessage());
             }
             
-            // v2.2.2: Email Benachrichtigung
-            try {
-                if (config.getEmailTo() != null && !config.getEmailTo().isEmpty()) {
-                    logger.info("Sending verification status email to: {}", config.getEmailTo());
-                    EmailNotifier.sendReport(config, "verification_report.html", "VERIFY", stats);
-                }
-            } catch (Exception e) {
-                logger.error("Failed to send verification email: {}", e.getMessage());
-            }
-
-            // --- v1.25: AUDIT PROTOCOL ---
-            if (config.isGenerateAuditProtocol()) {
-                // v2.2.0: Generate HTML verification protocol reports
-                try {
-                    logger.info("Generating HTML verification protocol reports...");
-                    var reportGenerator = new ProtocolReportGenerator(config, baseDir);
-                    reportGenerator.generateAllVerificationReports();
-                    reportGenerator.generateAllCombinedReports();
-                    logger.info("HTML verification protocol reports generated in reports/");
-                } catch (Exception e) {
-                    logger.error("Failed to generate HTML protocol reports: {}", e.getMessage(), e);
-                }
-            }
+            // --- v1.25: AUDIT PROTOCOL --- (stripped — unified pipeline handles reports)
             // -------------------------------
 
         } catch (RunTerminationException e) {

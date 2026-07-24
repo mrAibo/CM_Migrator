@@ -35,7 +35,7 @@ policy = run.find("OperationalPolicy.enforceCascadeDeleteDisabled(config);")
 connect = run.find("new CMConnectionPool(config)")
 workers = run.find("new ThreadPoolExecutor(")
 journal_write = run.find("new VerificationLogger()")
-report = run.find("ReportGenerator.generateVerificationReport")
+report = run.find("ReportDeliveryService.deliver(report")
 if min(policy, connect, workers, journal_write, report) < 0:
     raise SystemExit("FAIL: could not locate verifier policy/callflow markers")
 if not policy < connect and policy < workers and policy < journal_write and policy < report:

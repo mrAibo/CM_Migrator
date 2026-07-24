@@ -208,15 +208,6 @@ public class Main {
 
             if (!aborted && workersTerminated) {
                 synchronized (current) { current.phase = OperatorConsole.Phase.GENERATING_REPORTS; }
-                if (config.isGenerateAuditProtocol()) {
-                    try {
-                        logger.info("Generating migration protocol reports...");
-                        new ProtocolReportGenerator(config).generateAllMigrationReports();
-                        logger.info("Migration protocol reports generated in reports/");
-                    } catch (Exception e) {
-                        logger.error("Failed to generate protocol reports: {}", e.getMessage(), e);
-                    }
-                }
                 // ── Unified report pipeline (v2.2.1) ──
                 try {
                     boolean reportEnabled = !"false".equalsIgnoreCase(
