@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# IBM CM Migrator - Compile Script v2.1.31
+# IBM CM Migrator - Compile Script v2.2.1
 # Compiles Java sources and creates the executable JAR
 # =============================================================================
 
@@ -10,7 +10,7 @@ set -e  # Exit on error
 cd "$(dirname "$0")/.."
 
 echo "============================================="
-echo " IBM CM Migrator - Compiler v2.1.31"
+echo " IBM CM Migrator - Compiler v2.2.1"
 echo "============================================="
 
 # 1. Java Detection
