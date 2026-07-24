@@ -207,7 +207,20 @@ public class ReportDeliveryService {
         return true;
     }
 
+    // ponytail: test-only override via static field (package-private).
+    // Set to "mutt", "mailx", or "none" before calling deliver().
+    // Null means use system detection (production default).
+    static String mailPathOverride = null;
+
     private static String detectMailCommand() {
+        if (mailPathOverride != null) {
+            switch (mailPathOverride) {
+                case "mutt":  return "mutt";
+                case "mailx": return "mailx";
+                case "none":  return null;
+                default:      break;  // fall through to which
+            }
+        }
         if (commandExists("mutt")) return "mutt";
         if (commandExists("mailx")) return "mailx";
         return null;
