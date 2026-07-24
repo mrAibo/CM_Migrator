@@ -512,8 +512,8 @@ public final class UnifiedReportingTest {
         System.out.println("\n--- G. Mail Transport ---");
 
         // Fake mutt/mailx scripts are created by the shell runner and placed on PATH.
-        // The shell script exports FAKE_MAIL_BIN and prepends it to PATH so that
-        // Runtime.exec("which mutt") finds the fake scripts.
+        // Detection is controlled via ReportDeliveryService.mailPathOverride static field.
+        // This makes tests deterministic regardless of what's installed on the host.
 
         String fakeBin = System.getenv("FAKE_MAIL_BIN");
         if (fakeBin == null || fakeBin.isEmpty()) {
@@ -522,143 +522,136 @@ public final class UnifiedReportingTest {
             return;
         }
 
-        // Test 1: mutt receives -a arguments
-        {
-            // Ensure only mutt is available (remove mailx from fake bin)
-            File mailxFile = new File(fakeBin, "mailx");
-            if (mailxFile.exists()) mailxFile.delete();
+        // Clean up log files from previous test runs
+        new File(fakeBin, "mutt_args.log").delete();
+        new File(fakeBin, "mailx_args.log").delete();
 
-            // Clear previous args log
-            File muttLog = new File(fakeBin, "mutt_args.log");
-            muttLog.delete();
+        try {
+            // Test 1: mutt receives -a arguments
+            {
+                ReportDeliveryService.mailPathOverride = "mutt";
 
-            Path cfgPath = writeConfig(
-                "OPERATION_MODE=MIGRATE",
-                "SOURCE_SSID=S1", "DEST_SSID=D1",
-                "DB_PATH=" + tempDir.resolve("data_mutt").toString(),
-                "EMAIL_TO=test@example.com"
-            );
-            MigrationConfig cfg = new MigrationConfig(cfgPath.toString());
-            UnifiedReport r = buildReport(OperationType.MIGRATION, 10, 10, 0, 0, 0, -1, -1);
+                Path cfgPath = writeConfig(
+                    "OPERATION_MODE=MIGRATE",
+                    "SOURCE_SSID=S1", "DEST_SSID=D1",
+                    "DB_PATH=" + tempDir.resolve("data_mutt").toString(),
+                    "EMAIL_TO=test@example.com"
+                );
+                MigrationConfig cfg = new MigrationConfig(cfgPath.toString());
+                UnifiedReport r = buildReport(OperationType.MIGRATION, 10, 10, 0, 0, 0, -1, -1);
 
-            DeliveryResult result = ReportDeliveryService.deliver(r, cfg);
+                DeliveryResult result = ReportDeliveryService.deliver(r, cfg);
 
-            check("mutt transport: sent=true",
-                result.sent(),
-                "expected true, got " + result.sent());
-            check("mutt transport: attachmentsIncluded=true",
-                result.attachmentsIncluded(),
-                "expected true, got " + result.attachmentsIncluded());
-            check("mutt transport: transport=mutt",
-                "mutt".equals(result.transport()),
-                "got transport=" + result.transport());
-            check("mutt transport: no error message",
-                result.errorMessage() == null,
-                "got error=" + result.errorMessage());
+                check("mutt transport: sent=true",
+                    result.sent(),
+                    "expected true, got " + result.sent());
+                check("mutt transport: attachmentsIncluded=true",
+                    result.attachmentsIncluded(),
+                    "expected true, got " + result.attachmentsIncluded());
+                check("mutt transport: transport=mutt",
+                    "mutt".equals(result.transport()),
+                    "got transport=" + result.transport());
+                check("mutt transport: no error message",
+                    result.errorMessage() == null,
+                    "got error=" + result.errorMessage());
 
-            // Check that fake mutt recorded -a arguments
-            if (muttLog.exists()) {
-                String muttLogContent = new String(Files.readAllBytes(muttLog.toPath()));
-                check("mutt receives -a argument",
-                    muttLogContent.contains("-a"),
-                    "mutt args: " + muttLogContent.trim());
-            } else {
-                fail("mutt receives -a argument",
-                    "mutt_args.log not created — fake mutt was not invoked");
-            }
-        }
-
-        // Test 2: mailx -> attachmentsIncluded=false
-        {
-            // Remove mutt, restore mailx
-            new File(fakeBin, "mutt").delete();
-            Path mailxPath = Path.of(fakeBin, "mailx");
-            if (!Files.exists(mailxPath)) {
-                Files.write(mailxPath,
-                    "#!/bin/sh\necho \"$@\" >> \"$(dirname \"$0\")/mailx_args.log\"\nexit 0\n".getBytes());
-                mailxPath.toFile().setExecutable(true);
+                File muttLog = new File(fakeBin, "mutt_args.log");
+                if (muttLog.exists()) {
+                    String muttLogContent = new String(Files.readAllBytes(muttLog.toPath()));
+                    check("mutt receives -a argument",
+                        muttLogContent.contains("-a"),
+                        "mutt args: " + muttLogContent.trim());
+                } else {
+                    fail("mutt receives -a argument",
+                        "mutt_args.log not created — fake mutt was not invoked");
+                }
             }
 
-            Path cfgPath = writeConfig(
-                "OPERATION_MODE=MIGRATE",
-                "SOURCE_SSID=S1", "DEST_SSID=D1",
-                "DB_PATH=" + tempDir.resolve("data_mx").toString(),
-                "EMAIL_TO=test@example.com"
-            );
-            MigrationConfig cfg = new MigrationConfig(cfgPath.toString());
-            UnifiedReport r = buildReport(OperationType.MIGRATION, 10, 10, 0, 0, 0, -1, -1);
+            // Test 2: mailx -> attachmentsIncluded=false
+            {
+                ReportDeliveryService.mailPathOverride = "mailx";
 
-            DeliveryResult result = ReportDeliveryService.deliver(r, cfg);
+                Path cfgPath = writeConfig(
+                    "OPERATION_MODE=MIGRATE",
+                    "SOURCE_SSID=S1", "DEST_SSID=D1",
+                    "DB_PATH=" + tempDir.resolve("data_mx").toString(),
+                    "EMAIL_TO=test@example.com"
+                );
+                MigrationConfig cfg = new MigrationConfig(cfgPath.toString());
+                UnifiedReport r = buildReport(OperationType.MIGRATION, 10, 10, 0, 0, 0, -1, -1);
 
-            check("mailx transport: attachmentsIncluded=false",
-                !result.attachmentsIncluded(),
-                "expected false, got " + result.attachmentsIncluded());
-            check("mailx transport: transport=mailx",
-                "mailx".equals(result.transport()),
-                "got transport=" + result.transport());
-        }
+                DeliveryResult result = ReportDeliveryService.deliver(r, cfg);
 
-        // Test 3: no fake transport -> should not use fake scripts
-        {
-            new File(fakeBin, "mutt").delete();
-            new File(fakeBin, "mailx").delete();
+                check("mailx transport: attachmentsIncluded=false",
+                    !result.attachmentsIncluded(),
+                    "expected false, got " + result.attachmentsIncluded());
+                check("mailx transport: transport=mailx",
+                    "mailx".equals(result.transport()),
+                    "got transport=" + result.transport());
+            }
 
-            Path cfgPath = writeConfig(
-                "OPERATION_MODE=MIGRATE",
-                "SOURCE_SSID=S1", "DEST_SSID=D1",
-                "DB_PATH=" + tempDir.resolve("data_none").toString(),
-                "EMAIL_TO=test@example.com"
-            );
-            MigrationConfig cfg = new MigrationConfig(cfgPath.toString());
-            UnifiedReport r = buildReport(OperationType.MIGRATION, 10, 10, 0, 0, 0, -1, -1);
+            // Test 3: no mail transport available
+            {
+                ReportDeliveryService.mailPathOverride = "none";
 
-            DeliveryResult result = ReportDeliveryService.deliver(r, cfg);
+                Path cfgPath = writeConfig(
+                    "OPERATION_MODE=MIGRATE",
+                    "SOURCE_SSID=S1", "DEST_SSID=D1",
+                    "DB_PATH=" + tempDir.resolve("data_none").toString(),
+                    "EMAIL_TO=test@example.com"
+                );
+                MigrationConfig cfg = new MigrationConfig(cfgPath.toString());
+                UnifiedReport r = buildReport(OperationType.MIGRATION, 10, 10, 0, 0, 0, -1, -1);
 
-            check("no transport: sent=false",
-                !result.sent(),
-                "expected false, got " + result.sent());
-            check("no transport: attachmentsIncluded=false",
-                !result.attachmentsIncluded(),
-                "expected false, got " + result.attachmentsIncluded());
-            // After deleting fake scripts, system mailx may still be found on PATH.
-            // Accept "none" or any fallback transport.
-            check("no transport: no fake mutt/mailx found",
-                !"mutt".equals(result.transport()) || result.errorMessage() != null,
-                "got transport=" + result.transport() + ", error=" + result.errorMessage());
-            check("no transport: errorMessage not null",
-                result.errorMessage() != null,
-                "errorMessage should not be null");
-        }
+                DeliveryResult result = ReportDeliveryService.deliver(r, cfg);
 
-        // Test 4: non-zero exit -> sent=false, error visible
-        {
-            // Restore mutt that exits with 1
-            Path badMutt = Path.of(fakeBin, "mutt");
-            Files.write(badMutt,
-                "#!/bin/sh\necho 'mutt: send failed' >&2\nexit 1\n".getBytes());
-            badMutt.toFile().setExecutable(true);
-            new File(fakeBin, "mailx").delete();
+                check("no transport: sent=false",
+                    !result.sent(),
+                    "expected false, got " + result.sent());
+                check("no transport: attachmentsIncluded=false",
+                    !result.attachmentsIncluded(),
+                    "expected false, got " + result.attachmentsIncluded());
+                check("no transport: transport=none",
+                    "none".equals(result.transport()),
+                    "got transport=" + result.transport());
+                check("no transport: errorMessage not null",
+                    result.errorMessage() != null,
+                    "errorMessage should not be null");
+            }
 
-            Path cfgPath = writeConfig(
-                "OPERATION_MODE=MIGRATE",
-                "SOURCE_SSID=S1", "DEST_SSID=D1",
-                "DB_PATH=" + tempDir.resolve("data_fail").toString(),
-                "EMAIL_TO=test@example.com"
-            );
-            MigrationConfig cfg = new MigrationConfig(cfgPath.toString());
-            UnifiedReport r = buildReport(OperationType.MIGRATION, 10, 10, 0, 0, 0, -1, -1);
+            // Test 4: non-zero exit -> sent=false, error visible
+            {
+                // Replace mutt with one that exits 1, force via override
+                Path badMutt = Path.of(fakeBin, "mutt");
+                Files.write(badMutt,
+                    "#!/bin/sh\necho 'mutt: send failed' >&2\nexit 1\n".getBytes());
+                badMutt.toFile().setExecutable(true);
+                ReportDeliveryService.mailPathOverride = "mutt";
 
-            DeliveryResult result = ReportDeliveryService.deliver(r, cfg);
+                Path cfgPath = writeConfig(
+                    "OPERATION_MODE=MIGRATE",
+                    "SOURCE_SSID=S1", "DEST_SSID=D1",
+                    "DB_PATH=" + tempDir.resolve("data_fail").toString(),
+                    "EMAIL_TO=test@example.com"
+                );
+                MigrationConfig cfg = new MigrationConfig(cfgPath.toString());
+                UnifiedReport r = buildReport(OperationType.MIGRATION, 10, 10, 0, 0, 0, -1, -1);
 
-            check("non-zero exit: sent=false",
-                !result.sent(),
-                "expected false, got " + result.sent());
-            check("non-zero exit: errorMessage visible",
-                result.errorMessage() != null,
-                "error should be visible");
-            check("non-zero exit: transport=mutt",
-                "mutt".equals(result.transport()),
-                "got " + result.transport());
+                DeliveryResult result = ReportDeliveryService.deliver(r, cfg);
+
+                check("non-zero exit: sent=false",
+                    !result.sent(),
+                    "expected false, got " + result.sent());
+                check("non-zero exit: errorMessage visible",
+                    result.errorMessage() != null,
+                    "error should be visible");
+                check("non-zero exit: transport=mutt",
+                    "mutt".equals(result.transport()),
+                    "got " + result.transport());
+            }
+        } finally {
+            // Always reset to null so subsequent tests get clean state
+            ReportDeliveryService.mailPathOverride = null;
         }
 
         // Test 5: REPORT_ATTACH=false -> no -a arguments
