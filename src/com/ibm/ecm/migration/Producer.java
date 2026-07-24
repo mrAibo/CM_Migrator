@@ -250,6 +250,7 @@ public class Producer implements Runnable {
                         && (item = cursor2.fetchNext()) != null) {
 
                     fetched++;
+                    stats.incrementDiscovered(); // ponytail: discovered in PASS 2 after successful fetchNext()
                     String pidStr = ((DKPidICM) item.getPidObject()).pidString();
 
                     // Journal prüfen

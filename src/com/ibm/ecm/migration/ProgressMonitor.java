@@ -3,8 +3,9 @@
  * @Author: Aleksej Voronin, Sven Lindt
  * @Date:   26.01.2026
  * 
- * Gibt den Migrationsfortschritt auf der Konsole aus und generiert ein status.html-Dashboard.
- * Browser-Benutzeroberfläche: Von „Migration Control" Dashboard (helles Design).
+ * Generates status.html dashboard. No longer writes to System.out —
+ * OperatorConsole is the sole console renderer.
+ * Exposes a shared RateTracker so both consumers can read rate/ETA.
  */
 package com.ibm.ecm.migration;
 
@@ -17,7 +18,6 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -28,38 +28,15 @@ public class ProgressMonitor implements Runnable {
     private final long intervalMillis;
     private final String sourceSSID;
     private final String destSSID;
-
-    /**
-     * Abwärtskompatible einzelne Zuordnungsfelder.
-     */
     private final String sourceItemType;
     private final String destItemType;
-
     private final String operationMode;
     private final LocalDateTime startTimestamp;
 
+    // ponytail: shared rate tracker; read by OperatorConsole
+    private final RateTracker rateTracker;
+
     private long lastProcessed = -1;
-
-    private int lastLineCount = 0;
-
-    // Round 5 (Diagnostics): Sliding-Window-Sample für currentDocPerSec.
-    // Wird bei jedem printProgress()-Tick aktualisiert. Erstes Sample setzt Anker; weitere
-    // Samples berechnen Rate aus delta(processed)/delta(time) seit dem letzten Tick.
-    private long prevSampleProcessed = -1L;
-    private long prevSampleTimeMs = 0L;
-
-    // Round 6: Console-Mode-Resolution. Pretty rendert den Multi-Line-Dashboard mit ANSI-Clear,
-    // Plain liefert genau eine Logzeile pro Tick (für tee/pipe-Umgebungen).
-    private enum ConsoleMode { PRETTY, PLAIN }
-    private final ConsoleMode consoleMode = resolveConsoleMode();
-
-    private static ConsoleMode resolveConsoleMode() {
-        String prop = System.getProperty("cm.migrator.console.mode", "auto").trim().toLowerCase();
-        if ("pretty".equals(prop)) return ConsoleMode.PRETTY;
-        if ("plain".equals(prop))  return ConsoleMode.PLAIN;
-        // auto: pretty nur wenn echtes interaktives Terminal verfügbar ist
-        return (System.console() != null) ? ConsoleMode.PRETTY : ConsoleMode.PLAIN;
-    }
 
     public ProgressMonitor(MigrationStats stats,
                            long intervalMillis,
@@ -85,6 +62,12 @@ public class ProgressMonitor implements Runnable {
         this.destItemType = destItemType;
         this.operationMode = operationMode != null ? operationMode : "MIGRATE";
         this.startTimestamp = LocalDateTime.now();
+        this.rateTracker = new RateTracker(stats.getStartTime());
+    }
+
+    /** Expose for OperatorConsole wiring. */
+    public RateTracker getRateTracker() {
+        return rateTracker;
     }
 
     @Override
@@ -100,48 +83,34 @@ public class ProgressMonitor implements Runnable {
         printProgress();
     }
 
+    /** HTML-only tick — reads rates from RateTracker (console thread is sole writer). */
     private void printProgress() {
         long total = stats.getTotalItems();
         long processed = stats.getProcessedItems();
         long success = stats.getSuccessItems();
         long failed = stats.getFailedItems();
         long skipped = stats.getSkippedItems();
-        long deleted = stats.getDeletedItems(); // v1.25
+        long deleted = stats.getDeletedItems();
+
+        // Skip redundant writes when nothing changed
+        if (processed == lastProcessed && processed < total && total > 0) {
+            return;
+        }
+        lastProcessed = processed;
 
         long nowMs = System.currentTimeMillis();
-        long elapsedMillis = nowMs - stats.getStartTime();
-        double speed = 0.0;
-        if (elapsedMillis > 0) {
-            double elapsedSeconds = elapsedMillis / 1000.0;
-            if (elapsedSeconds > 0) {
-                speed = (double) processed / elapsedSeconds;
-            }
-        }
+        RateTracker.Sample r = rateTracker.getLatest(nowMs);
 
-        // Round 5: aktuelles Sliding-Window-Tempo (delta processed / delta time seit letztem Tick).
-        // Bis zum zweiten Sample fällt currentSpeed auf den Average zurück, damit die Anzeige nicht "0" springt.
-        double currentSpeed = speed;
-        if (prevSampleProcessed >= 0L && nowMs > prevSampleTimeMs) {
-            long deltaProcessed = Math.max(0L, processed - prevSampleProcessed);
-            long deltaMs = nowMs - prevSampleTimeMs;
-            currentSpeed = (deltaProcessed * 1000.0) / deltaMs;
-        }
-        prevSampleProcessed = processed;
-        prevSampleTimeMs = nowMs;
+        double speed = r.averageRate;
+        double currentSpeed = r.currentRate;
+        String eta = r.eta;
+        String elapsedStr = RateTracker.formatDuration(r.elapsedMs);
 
-        String eta = "--:--";
         String percentStr = "0.0%";
         double percentVal = 0.0;
-        String elapsedStr = formatDuration(Duration.ofMillis(elapsedMillis));
-
         if (total > 0) {
-            percentVal = ((double) processed / total) * 100.0;
+            percentVal = Math.min(100.0, Math.max(0.0, (double) processed / total * 100.0));
             percentStr = String.format("%5.1f%%", percentVal);
-            if (processed > 0 && speed > 0) {
-                long remainingItems = total - processed;
-                long remainingSeconds = (long) (remainingItems / speed);
-                eta = formatDuration(Duration.ofSeconds(remainingSeconds));
-            }
         }
 
         // Pool metrics
@@ -158,62 +127,12 @@ public class ProgressMonitor implements Runnable {
         long dstBorrow   = (pm == null) ? 0L : pm.getDestBorrowCount();
 
         ItemMigrator.PerformanceSnapshot perf = ItemMigrator.getPerformanceSnapshot();
-        
-        if (processed == lastProcessed && processed < total && total > 0) {
-            return;
-        }
-        lastProcessed = processed;
 
-        // Round 8A: Pretty-Mode malt einen Multi-Line-Dashboard und aktualisiert ihn in-place.
-        // Plain-Mode bleibt unverändert: genau eine kompakte logger.info-Zeile pro Tick.
-        // Beide Modi schließen sich gegenseitig aus — kein Per-Tick-INFO-Log in Pretty-Mode mehr,
-        // damit Logger-Ausgaben nicht in den Dashboard-Text hineingeschrieben werden.
-        if (consoleMode == ConsoleMode.PRETTY) {
-            String dashboard = renderPrettyDashboard(
-                    processed, total, percentVal,
-                    currentSpeed, speed, eta, elapsedStr,
-                    success, failed, skipped, deleted,
-                    srcWaitMs, dstWaitMs,
-                    refillAtt, refillOk, refillFail,
-                    reconnAtt, reconnOk, reconnFail,
-                    perf);
-
-            // Round 8A: Dashboard MUSS mit '\n' enden, damit der Cursor am Ende auf Spalte 0
-            // unterhalb der letzten sichtbaren Zeile steht. Anzahl der gerenderten Zeilen
-            // entspricht damit exakt der Anzahl '\n' im String.
-            if (!dashboard.endsWith("\n")) dashboard = dashboard + "\n";
-
-            StringBuilder buf = new StringBuilder(dashboard.length() + lastLineCount * 8 + 4);
-            if (lastLineCount > 0) {
-                buf.append('\r'); // sicherstellen, dass wir an Spalte 0 starten
-                for (int i = 0; i < lastLineCount; i++) buf.append("\u001B[1A\u001B[2K");
-                buf.append('\r'); // nach den Up-/Clear-Sequenzen erneut Spalte 0 erzwingen
-            }
-            buf.append(dashboard);
-            System.out.print(buf.toString());
-            System.out.flush(); // ANSI-Sequenzen sofort schreiben, sonst kann der Druck stocken
-            lastLineCount = (int) dashboard.chars().filter(ch -> ch == '\n').count();
-        } else {
-            // Plain-Mode: unverändert — eine Logzeile pro Tick, kein ANSI, kein Dashboard.
-            // Round 5: cur=aktuelle Rate (Sliding-Window), avg=Durchschnitt seit Start.
-            String logLine = String.format("%s | %s -> %s | %s | %d/%d | cur=%.1f avg=%.1f it/s | ETA %s | ok=%d fail=%d skip=%d del=%d | pool srcWait=%.1fms dstWait=%.1fms refill=%d/%d/%d reconn=%d/%d/%d borrow S=%d D=%d",
-                    safe(operationMode),
-                    safe(sourceSSID), safe(destSSID),
-                    percentStr,
-                    processed, total,
-                    currentSpeed, speed, eta, success, failed, skipped, deleted,
-                    srcWaitMs, dstWaitMs,
-                    refillOk, refillAtt, refillFail,
-                    reconnOk, reconnAtt, reconnFail,
-                    srcBorrow, dstBorrow);
-            logger.info(logLine);
-        }
-        
-        // PERF-Zeile nur für Debug-Logging (Console-Ausgabe ist bereits in 'output' enthalten)
+        // PERF debug line only (never System.out)
         if (perf.totalItems > 0) {
-            String perfLine = String.format("PERF [%d items]: Retrieve=%sms | Copy=%sms | Add=%sms | AttrOK=%d | AttrFail=%d",
-                    perf.totalItems, perf.avgRetrieve, perf.avgCopy, perf.avgAdd, perf.attrSuccess, perf.attrFailed);
-            logger.debug(perfLine);
+            logger.debug(String.format("PERF [%d items]: Retrieve=%sms | Copy=%sms | Add=%sms | AttrOK=%d | AttrFail=%d",
+                    perf.totalItems, perf.avgRetrieve, perf.avgCopy, perf.avgAdd,
+                    perf.attrSuccess, perf.attrFailed));
         }
 
         writeHtmlStatus(percentVal, percentStr, processed, total, speed, currentSpeed, eta, elapsedStr,
@@ -657,50 +576,4 @@ public class ProgressMonitor implements Runnable {
         if (minutes > 0) return String.format("%02d:%02d", minutes, seconds);
         return String.format("%02ds", seconds);
     }
-
-    /**
-     * Round 6: Operator-freundlicher Multi-Line-Dashboard (Pretty-Mode).
-     * Header, Bar, Speed, Counts, Perf, Pool, optionale Warnungen.
-     */
-    private String renderPrettyDashboard(long processed, long total, double percentVal,
-                                         double currentSpeed, double avgSpeed,
-                                         String eta, String elapsed,
-                                         long success, long failed, long skipped, long deleted,
-                                         double srcWaitMs, double dstWaitMs,
-                                         long refillAtt, long refillOk, long refillFail,
-                                         long reconnAtt, long reconnOk, long reconnFail,
-                                         ItemMigrator.PerformanceSnapshot perf) {
-        final int barWidth = 30;
-        int filled = (int) Math.round(Math.max(0.0, Math.min(100.0, percentVal)) / 100.0 * barWidth);
-        StringBuilder bar = new StringBuilder(barWidth + 2);
-        bar.append('[');
-        for (int i = 0; i < barWidth; i++) bar.append(i < filled ? '=' : ' ');
-        bar.append(']');
-
-        StringBuilder out = new StringBuilder(512);
-        out.append(safe(operationMode)).append("  ").append(safe(sourceSSID)).append(" -> ").append(safe(destSSID)).append('\n');
-        out.append(safe(sourceItemType)).append(" -> ").append(safe(destItemType)).append('\n');
-        out.append(bar).append(' ').append(String.format("%5.1f%%", percentVal))
-           .append("  ").append(fmtInt(processed)).append('/').append(fmtInt(total)).append('\n');
-        out.append(String.format("cur: %.1f it/s | avg: %.1f it/s | ETA: %s | elapsed: %s",
-                currentSpeed, avgSpeed, eta, elapsed)).append('\n');
-        out.append(String.format("ok: %d | fail: %d | skip: %d | del: %d",
-                success, failed, skipped, deleted)).append('\n');
-        if (perf.totalItems > 0) {
-            out.append(String.format("retrieve: %s ms | copy: %s ms | add: %s ms",
-                    perf.avgRetrieve, perf.avgCopy, perf.avgAdd)).append('\n');
-        }
-        out.append(String.format("srcWait: %.1f ms | dstWait: %.1f ms | refill: %d/%d/%d | reconn: %d/%d/%d",
-                srcWaitMs, dstWaitMs, refillOk, refillAtt, refillFail, reconnOk, reconnAtt, reconnFail));
-
-        boolean anyWarn = (failed > 0) || (refillFail > 0) || (reconnFail > 0);
-        if (anyWarn) {
-            out.append('\n').append("WARN:");
-            if (failed > 0)     out.append(" failed=").append(failed);
-            if (refillFail > 0) out.append(" refillFailures=").append(refillFail);
-            if (reconnFail > 0) out.append(" reconnFailures=").append(reconnFail);
-        }
-        return out.toString();
-    }
 }
-

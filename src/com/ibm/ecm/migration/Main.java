@@ -65,11 +65,14 @@ public class Main {
         if (mappingStr.length() > 40) mappingStr = mappingStr.substring(0, 37) + "...";
 
         // HTML dashboard (ProgressMonitor) — keep for status.html
-        ProgressMonitor monitor = new ProgressMonitor(stats, 5000,
+        final ProgressMonitor monitor = new ProgressMonitor(stats, 5000,
                 config.getSourceSSID(), config.getDestSSID(),
                 mappingStr, "", config.getOperationMode());
         Thread monitorThread = new Thread(monitor);
         monitorThread.start();
+
+        // Shared rate tracker (sole writer: console thread)
+        final RateTracker rateTracker = monitor.getRateTracker();
 
         // ─── Console dashboard thread ───
         final OperatorConsole.Snapshot current = new OperatorConsole.Snapshot();
@@ -113,7 +116,17 @@ public class Main {
                     current.journalPersisted = journal.getPersistedCount();
                     current.journalHealth = journalHealthFromString(journal.getJournalHealth());
                     current.journalError = journal.getJournalError();
-                    current.configuredWorkers = threadCount; // ponytail: fixed pool size
+                    current.configuredWorkers = threadCount;
+                    // Sole RateTracker writer: update rate/ETA/stall
+                    long nowMs = System.currentTimeMillis();
+                    RateTracker.Sample r = rateTracker.update(
+                            stats.getProcessedItems(), stats.getTotalItems(), nowMs);
+                    current.currentRate = r.currentRate;
+                    current.averageRate = r.averageRate;
+                    current.eta = r.eta;
+                    current.lastProgressMs = r.lastProgressMs;
+                    current.streaming = r.isStreaming;
+                    current.elapsedMs = Math.max(0, nowMs - stats.getStartTime());
                 }
                 OperatorConsole.draw(current);
             }

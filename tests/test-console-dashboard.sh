@@ -13,12 +13,13 @@ echo "=== ConsoleDashboardTest ==="
 
 # Compile test and its direct (dependency-free) sources only
 "$javac_cmd" -d "$work_dir" \
+    src/com/ibm/ecm/migration/RateTracker.java \
     src/com/ibm/ecm/migration/OperatorConsole.java \
     src/com/ibm/ecm/migration/ConsoleUI.java \
-    tests/java/com/ibm/ecm/migration/ConsoleDashboardTest.java
+    tests/java/com/ibm/ecm/migration/OperatorConsoleTest.java
 
 # Run test; pass/fail based on exit code
-"$java_cmd" -cp "$work_dir" com.ibm.ecm.migration.ConsoleDashboardTest
+"$java_cmd" -cp "$work_dir" com.ibm.ecm.migration.OperatorConsoleTest
 exit_code=$?
 
 echo ""
