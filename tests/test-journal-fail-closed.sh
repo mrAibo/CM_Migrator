@@ -40,3 +40,13 @@ fi
 
 "$java_cmd" -cp "$OUT:$ROOT/lib/h2-2.2.224.jar" \
   com.ibm.ecm.migration.MigrationJournalFailClosedTest
+
+# ── CME / persistedWrites integration test (uses real MigrationJournal + H2) ──
+"$javac_cmd" -cp "$ROOT/lib/h2-2.2.224.jar" -d "$OUT" \
+  "$ROOT/src/com/ibm/ecm/migration/MigrationJournal.java" \
+  "$ROOT/src/com/ibm/ecm/migration/MigrationItem.java" \
+  "$ROOT/tests/stubs/org/apache/logging/log4j/Logger.java" \
+  "$ROOT/tests/stubs/org/apache/logging/log4j/LogManager.java" \
+  "$ROOT/tests/java/com/ibm/ecm/migration/JournalCMETest.java"
+
+"$java_cmd" -cp "$OUT:$ROOT/lib/h2-2.2.224.jar" com.ibm.ecm.migration.JournalCMETest

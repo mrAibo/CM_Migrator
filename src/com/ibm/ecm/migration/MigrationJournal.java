@@ -41,6 +41,8 @@ public class MigrationJournal implements AutoCloseable {
     private final AtomicLong cacheHits = new AtomicLong(0);
     private final AtomicLong cacheMisses = new AtomicLong(0);
     private final AtomicLong cacheEvictions = new AtomicLong(0);
+    /** O(1) counter: committed writes this JVM run (no cache scan). */
+    private final AtomicLong persistedWrites = new AtomicLong(0);
     
     private String baseDir;
     private final String dbUrlAppend;
@@ -347,6 +349,7 @@ public class MigrationJournal implements AutoCloseable {
                 }
                 pstmt.executeBatch();
                 conn.commit();
+                persistedWrites.addAndGet(entries.size());
                 return true;
             } catch (SQLException e) {
                 conn.rollback();
@@ -402,13 +405,8 @@ public class MigrationJournal implements AutoCloseable {
     int getJournalQueueSize() { return journalQueue.size(); }
     int getJournalQueueCapacity() { return journalQueue.size() + journalQueue.remainingCapacity(); }
 
-    long getPersistedCount() {
-        long count = 0;
-        for (String status : statusCache.values()) {
-            if ("SUCCESS".equals(status) || "DELETED".equals(status)) count++;
-        }
-        return count;
-    }
+    /** O(1) — committed writes this JVM run only (no statusCache scan). */
+    long getPersistedWritesThisRun() { return persistedWrites.get(); }
 
     String getJournalHealth() {
         if (writerFailure != null) return "FAILED";

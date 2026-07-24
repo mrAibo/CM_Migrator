@@ -113,7 +113,7 @@ public class Main {
                     current.queueDepth = queue.size();
                     current.journalQueueDepth = journal.getJournalQueueSize();
                     current.journalQueueCapacity = journal.getJournalQueueCapacity();
-                    current.journalPersisted = journal.getPersistedCount();
+                    current.journalPersisted = journal.getPersistedWritesThisRun();
                     current.journalHealth = journalHealthFromString(journal.getJournalHealth());
                     current.journalError = journal.getJournalError();
                     current.configuredWorkers = threadCount;
