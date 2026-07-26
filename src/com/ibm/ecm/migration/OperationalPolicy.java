@@ -31,6 +31,18 @@ final class OperationalPolicy {
         }
     }
 
+    static void requireNoDeleteResiduals(java.util.Map<String, Long> residuals)
+            throws RunTerminationException {
+        long total = 0;
+        for (Long count : residuals.values()) {
+            if (count != null && count > 0) total += count;
+        }
+        if (total > 0) {
+            throw policyFailure("Source delete left " + total
+                    + " object(s) in scope: " + residuals);
+        }
+    }
+
     private static void requireNonBlank(String name, String value)
             throws RunTerminationException {
         if (value == null || value.trim().isEmpty()) {

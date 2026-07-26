@@ -44,6 +44,10 @@ public class MigrationStats {
         processedItems.incrementAndGet();
         failedItems.incrementAndGet();
     }
+
+    public void recordResidualFailures(long count) {
+        if (count > 0) failedItems.addAndGet(count);
+    }
     
     public void incrementSkipped() {
         processedItems.incrementAndGet();

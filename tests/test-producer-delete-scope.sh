@@ -38,10 +38,18 @@ from pathlib import Path
 
 producer = Path("src/com/ibm/ecm/migration/Producer.java").read_text()
 main = Path("src/com/ibm/ecm/migration/Main.java").read_text()
+item_migrator = Path("src/com/ibm/ecm/migration/ItemMigrator.java").read_text()
 
 checks = {
     "discovery task is guarded": "discoveryExecutor.submit(workerFailureState.guard(" in producer,
     "producer top-level is guarded": "workerExecutor.submit(workerFailureState.guard(\n                producer" in main,
+    "run cache is cleared once before workers": "ItemMigrator.clearRunCache();" in main,
+    "delete residuals are counted after workers": "countDeleteResiduals(pool, config)" in main,
+    "fresh residual cursor exists": "static long countCandidates(" in producer,
+    "ignored attributes are explicit": "ignoredAttributes.contains(name)" in item_migrator,
+    "missing attribute fails permanently": "Destination attribute is missing" in item_migrator,
+    "attribute failures are not warning-only": 'logger.warn("Attribute copy failed:' not in item_migrator,
+    "child add failures are not warning-only": 'logger.warn("Child add error:' not in item_migrator,
 }
 failed = [name for name, ok in checks.items() if not ok]
 if failed:

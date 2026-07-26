@@ -1,6 +1,7 @@
 package com.ibm.ecm.migration;
 
 import java.util.concurrent.*;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -145,6 +146,7 @@ public class Main {
 
         // ── Declarations that must outlive the migration try/finally
         RunTerminationException terminalOutcome = null;
+        RunTerminationException deleteResidualOutcome = null;
         WorkerTermination.Outcome termination = null;
         boolean aborted = false;
         boolean journalClosed = false;
@@ -158,12 +160,16 @@ public class Main {
 
         // Start Producer & Consumers
         synchronized (current) { current.phase = OperatorConsole.Phase.DISCOVERING; }
+        ItemMigrator.clearRunCache();
+        java.util.Set<String> ignoredAttributes = config.getIgnoredMigrationAttributes();
         Producer producer = new Producer(queue, config, journal, stats, workerFailureState);
         workerExecutor.submit(workerFailureState.guard(
                 producer, ShutdownCoordinator::requestShutdown));
 
         for (int i = 0; i < threadCount; i++) {
-            Consumer consumer = new Consumer(queue, new ItemMigrator(pool), journal, stats, config);
+            Consumer consumer = new Consumer(queue,
+                    new ItemMigrator(pool, ignoredAttributes),
+                    journal, stats, config);
             workerExecutor.submit(workerFailureState.guard(
                     consumer, ShutdownCoordinator::requestShutdown));
         }
@@ -206,6 +212,27 @@ public class Main {
                     "Migration stopped by shutdown request.", workersTerminated, null);
         }
         aborted = terminalOutcome != null;
+
+        if (!aborted && workersTerminated
+                && "DELETE".equalsIgnoreCase(config.getOperationMode())
+                && !config.isDryRun()) {
+            try {
+                Map<String, Long> residuals = countDeleteResiduals(pool, config);
+                long residualCount = 0;
+                for (Long count : residuals.values()) residualCount += count;
+                stats.recordResidualFailures(residualCount);
+                try {
+                    OperationalPolicy.requireNoDeleteResiduals(residuals);
+                } catch (RunTerminationException e) {
+                    deleteResidualOutcome = e;
+                }
+            } catch (Exception e) {
+                stats.recordResidualFailures(1);
+                deleteResidualOutcome = new RunTerminationException(
+                        RunTerminationException.Reason.FAILED,
+                        "Source delete residual query failed.", true, e);
+            }
+        }
 
         // ─── Journal close before reports (PR #13 invariant) ───
         journalClosed = false;
@@ -256,6 +283,11 @@ public class Main {
             }
         } else {
             logger.warn("Migration did not complete normally. Skipping reports and email.");
+        }
+
+        if (terminalOutcome == null && deleteResidualOutcome != null) {
+            terminalOutcome = deleteResidualOutcome;
+            aborted = true;
         }
 
         if (terminalOutcome == null && stats.getFailedItems() > 0) {
@@ -314,6 +346,22 @@ public class Main {
 
         if (terminalOutcome != null) throw terminalOutcome;
         workerFailureState.throwIfPresent("Migration worker failed");
+    }
+
+    private static Map<String, Long> countDeleteResiduals(
+            CMConnectionPool pool, MigrationConfig config) throws Exception {
+        Map<String, Long> residuals = new LinkedHashMap<>();
+        CMConnection source = pool.borrowSource();
+        try {
+            for (String itemType : config.getItemTypeMapping().keySet()) {
+                String query = Producer.buildQuery(itemType, config.getFilterPredicate());
+                residuals.put(itemType,
+                        Producer.countCandidates(source.getDatastore(), query));
+            }
+        } finally {
+            pool.returnSource(source);
+        }
+        return residuals;
     }
 
     private static OperatorConsole.JournalHealth journalHealthFromString(String s) {
