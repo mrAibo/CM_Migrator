@@ -52,6 +52,7 @@ public class MigrationStats {
 
     public void incrementDeleted() {
         processedItems.incrementAndGet();
+        successItems.incrementAndGet();
         deletedItems.incrementAndGet();
     }
 

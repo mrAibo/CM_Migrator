@@ -577,16 +577,16 @@ Nicht zuverlässig geprüft werden:
 
 ## 11. Migration
 
-Eingangsdaten sind `MIGRATE_ITEMTYPES` und ein optionales XQPE-`FILTER_PREDICATE`. `Producer` validiert ItemType-Namen und durchläuft je Source-ItemType zwei SDK-Cursor:
+Eingangsdaten sind `MIGRATE_ITEMTYPES` und ein optionales XQPE-`FILTER_PREDICATE`. `Producer` validiert ItemType-Namen und hängt das Prädikat an `/<SourceItemType>` an; absolute Filterpfade werden abgelehnt, damit sie den konfigurierten ItemType nicht ersetzen können.
 
-1. Pass 1 zählt Treffer;
-2. Pass 2 überspringt terminale Journalzustände und legt übrige Items in die begrenzte Queue.
+- `SINGLE_PASS` (Standard) entdeckt und enqueued in einem Cursor-Durchlauf.
+- `SDK_CURSOR` zählt in Pass 1 und enqueued in Pass 2.
 
 `Producer` und Consumer teilen den `CMConnectionPool`. Consumer nehmen Batches, führen Migration oder Source Delete aus und schreiben `SUCCESS`, `FAILED`, `SKIPPED` beziehungsweise `DELETED` asynchron ins Journal. Erfolgreiche Migration speichert SHA-256 und Destination-ID.
 
 Bei normalem Producer-Ende wird je Consumer eine Poison Pill gesendet. Bei Shutdown oder Producer-/Discovery-Fehler werden keine normalen Poison Pills gesendet; Consumer verlassen den Loop über das globale Shutdown-Signal.
 
-Per-Item-Consumerfehler werden geloggt/journaled und können Retries auslösen. Sie führen nicht zwingend zu einem Prozessfehler. Ein Producer-/Discovery-Fehler wird dagegen zentral gespeichert, fordert Shutdown an und wird nach Cleanup weitergereicht.
+Per-Item-Consumerfehler werden geloggt/journaled und können Retries auslösen. Bleiben Itemfehler übrig, wird der Report noch erzeugt, der Lauf endet danach aber mit `FAILED` und Nonzero-Exit. Unbehandelte Consumer- sowie Producer-/Discovery-Fehler werden zentral gespeichert, fordern Shutdown an und werden nach Cleanup weitergereicht.
 
 Parallelität wird über Threads, Queue, Batch und Pools begrenzt. `PRODUCER_COUNT_STRATEGY` steuert den Cursor-Modus: `SINGLE_PASS` (Standard) enqueued in einem Durchlauf, `SDK_CURSOR` führt zwei Pässe aus (Zählen + Enqueue). Unbekannte Werte führen zu fail-fast.
 

@@ -204,8 +204,10 @@ public class Consumer implements Runnable {
                             for (MigrationItem item : currentBatch) {
                                 if (!isDryRun) {
                                     journal.logDeletion(item.getItemId(), item.getSourceItemType(), "Deleted successfully");
+                                    stats.incrementDeleted();
+                                } else {
+                                    stats.incrementSuccess();
                                 }
-                                stats.incrementSuccess();
                             }
                         } else {
                             journal.logBatchSuccess(currentBatch);
@@ -293,11 +295,14 @@ public class Consumer implements Runnable {
                 if (isDeleteMode) {
                     if (!isDryRun) {
                         journal.logDeletion(item.getItemId(), item.getSourceItemType(), "Deleted (Single Fallback)");
+                        stats.incrementDeleted();
+                    } else {
+                        stats.incrementSuccess();
                     }
                 } else {
                     journal.logSuccess(item.getItemId(), item.getSourceItemType(), item.getChecksum(), item.getDestItemId());
+                    stats.incrementSuccess();
                 }
-                stats.incrementSuccess();
                 return;
             }
 
