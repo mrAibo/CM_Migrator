@@ -110,6 +110,12 @@ if "CliShutdownLifecycle" in embedded or "addShutdownHook" in embedded:
 migration_core = main[main.find("public static void startMigration"):]
 if "addShutdownHook" in migration_core or "setupShutdownHook" in migration_core:
     raise SystemExit("FAIL: shared Main.startMigration must not register JVM shutdown hooks")
+if "Thread resourceMonitorThread = startResourceMonitor();" not in migration_core:
+    raise SystemExit("FAIL: resource monitor handle must be retained")
+if "resourceMonitorThread.interrupt();" not in migration_core or "resourceMonitorThread.join(" not in migration_core:
+    raise SystemExit("FAIL: resource monitor must be interrupted and joined")
+if "private static Thread startResourceMonitor()" not in migration_core:
+    raise SystemExit("FAIL: resource monitor starter must return its thread")
 
 print("RunLifecycleStructureTest: PASS")
 PY

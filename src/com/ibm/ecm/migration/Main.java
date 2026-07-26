@@ -156,7 +156,7 @@ public class Main {
             CMConnectionPool pool = new CMConnectionPool(config);
         pool.init();
         MigrationMetrics.register(stats, queue, config.getSourceSSID(), config.getDestSSID());
-        startResourceMonitor();
+        Thread resourceMonitorThread = startResourceMonitor();
 
         // Start Producer & Consumers
         synchronized (current) { current.phase = OperatorConsole.Phase.DISCOVERING; }
@@ -303,8 +303,12 @@ public class Main {
                 try { journal.close(); } catch (Exception ignored) {}
             }
             pool.close();
+            resourceMonitorThread.interrupt();
             monitorThread.interrupt();
-            try { monitorThread.join(5000); } catch (InterruptedException e) {
+            try {
+                resourceMonitorThread.join(5000);
+                monitorThread.join(5000);
+            } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 if (terminalOutcome == null)
                     terminalOutcome = new RunTerminationException(
@@ -370,7 +374,7 @@ public class Main {
         catch (IllegalArgumentException e) { return OperatorConsole.JournalHealth.UNKNOWN; }
     }
 
-    private static void startResourceMonitor() {
+    private static Thread startResourceMonitor() {
         Thread t = new Thread(() -> {
             while (!ShutdownCoordinator.isShuttingDown()) {
                 try { Thread.sleep(10000); } catch (InterruptedException e) { break; }
@@ -384,5 +388,6 @@ public class Main {
         }, "ResourceMonitor");
         t.setDaemon(true);
         t.start();
+        return t;
     }
 }
