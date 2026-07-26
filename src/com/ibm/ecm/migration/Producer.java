@@ -74,7 +74,7 @@ public class Producer implements Runnable {
                     break;
                 }
 
-                discoveryExecutor.submit(() -> {
+                discoveryExecutor.submit(workerFailureState.guard(() -> {
                     ThreadContext.put("itemType", sourceType);
                     
                     try (CMConnection localConn = new CMConnection(
@@ -93,7 +93,7 @@ public class Producer implements Runnable {
                     } finally {
                         ThreadContext.clearAll();
                     }
-                });
+                }, ShutdownCoordinator::requestShutdown));
             }
 
             discoveryExecutor.shutdown();
@@ -206,97 +206,105 @@ public class Producer implements Runnable {
                     new DKNVPair(DKConstant.DK_CM_PARM_END, null)
             };
 
-            // PASS 1: Zählen (TOTAL) - immer, auch bei DELETE.
-            // Wichtig: Total muss vor PASS2 stabil sein und darf während Enqueue nicht wachsen.
             String strategy = config.getProducerCountStrategy();
-            long totalMatched = 0;
-
-            logger.info("Using SDK-based PASS1 count for {} (Strategy={}, OperationMode={})",
-                    sourceType, strategy, config.getOperationMode());
-
-            dkResultSetCursor cursor = ds.execute(query, DKConstant.DK_CM_XQPE_QL_TYPE, options);
-
-            try {
-                DKDDO item;
-                while (!ShutdownCoordinator.isShuttingDown()
-                        && (item = cursor.fetchNext()) != null) {
-                    totalMatched++;
-                }
-
-                if (!ShutdownCoordinator.isShuttingDown()) {
-                    stats.addTotalItems(totalMatched);
-                    logger.info("SDK PASS1 matched for {}: {}", sourceType, totalMatched);
-                } else {
-                    logger.warn("SDK PASS1 interrupted by shutdown for {} after {} matched items",
-                            sourceType, totalMatched);
-                    return;
-                }
-            } finally {
-                cursor.close();
-                cursor.destroy();
+            if (usesSinglePass(strategy)) {
+                processSinglePass(ds, query, sourceType, destType, isDeleteMode, options);
+            } else {
+                processTwoPass(ds, query, sourceType, destType, isDeleteMode, options);
             }
+    }
 
-            // PASS 2: Enqueue (Verarbeitung)
-            dkResultSetCursor cursor2 = ds.execute(query, DKConstant.DK_CM_XQPE_QL_TYPE, options);
+    static boolean usesSinglePass(String strategy) {
+        if ("SINGLE_PASS".equals(strategy)) return true;
+        if ("SDK_CURSOR".equals(strategy)) return false;
+        throw new IllegalArgumentException("Unsupported PRODUCER_COUNT_STRATEGY: " + strategy
+                + ". Supported: SDK_CURSOR, SINGLE_PASS");
+    }
 
-            long fetched = 0;
-            long enqueued = 0;
-            long skipped = 0;
-            long tStart = System.currentTimeMillis();
+    private void processTwoPass(DKDatastoreICM ds, String query, String sourceType,
+                                String destType, boolean isDeleteMode, DKNVPair[] options) throws Exception {
+        logger.info("SDK_CURSOR PASS1 for {} (OperationMode={})", sourceType, config.getOperationMode());
+        long totalMatched = 0;
+        dkResultSetCursor cursor = ds.execute(query, DKConstant.DK_CM_XQPE_QL_TYPE, options);
 
-            try {
-                DKDDO item;
-                while (!ShutdownCoordinator.isShuttingDown()
-                        && (item = cursor2.fetchNext()) != null) {
+        try {
+            DKDDO item;
+            while (!ShutdownCoordinator.isShuttingDown() && (item = cursor.fetchNext()) != null) {
+                totalMatched++;
+            }
+            if (ShutdownCoordinator.isShuttingDown()) return;
+            stats.addTotalItems(totalMatched);
+        } finally {
+            cursor.close();
+            cursor.destroy();
+        }
 
-                    fetched++;
-                    stats.incrementDiscovered(); // ponytail: discovered in PASS 2 after successful fetchNext()
-                    String pidStr = ((DKPidICM) item.getPidObject()).pidString();
+        processCursor(ds.execute(query, DKConstant.DK_CM_XQPE_QL_TYPE, options),
+                "SDK_CURSOR", sourceType, destType, isDeleteMode, false);
+    }
 
-                    // Journal prüfen
-                    boolean alreadyDone = isDeleteMode
-                            ? journal.isDeleted(pidStr, sourceType)
-                            : journal.isMigrated(pidStr, sourceType);
+    private void processSinglePass(DKDatastoreICM ds, String query, String sourceType,
+                                   String destType, boolean isDeleteMode, DKNVPair[] options) throws Exception {
+        processCursor(ds.execute(query, DKConstant.DK_CM_XQPE_QL_TYPE, options),
+                "SINGLE_PASS", sourceType, destType, isDeleteMode, true);
+    }
 
-                    if (alreadyDone) {
-                        skipped++;
-                        stats.incrementSkipped();
-                        continue;
-                    }
+    private void processCursor(dkResultSetCursor cursor, String strategy, String sourceType,
+                               String destType, boolean isDeleteMode, boolean setTotalAtEnd) throws Exception {
+        long fetched = 0;
+        long enqueued = 0;
+        long skipped = 0;
+        long started = System.currentTimeMillis();
 
-                    MigrationItem migrationItem = new MigrationItem(pidStr, sourceType, destType);
+        try {
+            DKDDO item;
+            while (!ShutdownCoordinator.isShuttingDown() && (item = cursor.fetchNext()) != null) {
+                fetched++;
+                stats.incrementDiscovered();
+                String pid = ((DKPidICM) item.getPidObject()).pidString();
+                boolean alreadyDone = isDeleteMode
+                        ? journal.isDeleted(pid, sourceType)
+                        : journal.isMigrated(pid, sourceType);
 
-                    while (!ShutdownCoordinator.isShuttingDown()) {
-                        if (queue.offer(migrationItem, 1, TimeUnit.SECONDS)) {
-                            enqueued++;
-                            break;
-                        }
-                    }
+                if (alreadyDone) {
+                    skipped++;
+                    stats.incrementSkipped();
+                    continue;
+                }
 
-                    if (ShutdownCoordinator.isShuttingDown()) {
-                        logger.warn("Producer stopping enqueue for {} due to shutdown. Fetched={}, Enqueued={}, Skipped={}",
-                                sourceType, fetched, enqueued, skipped);
+                MigrationItem migrationItem = new MigrationItem(pid, sourceType, destType);
+                while (!ShutdownCoordinator.isShuttingDown()) {
+                    if (queue.offer(migrationItem, 1, TimeUnit.SECONDS)) {
+                        enqueued++;
                         break;
                     }
-
-                    if (fetched % 10000 == 0) {
-                         logger.info("Producer Progress {}: Fetched={}, Enqueued={}, Skipped={}", sourceType, fetched, enqueued, skipped);
-                    }
                 }
-            } finally {
-                cursor2.close();
-                cursor2.destroy();
+
+                if (fetched % 10000 == 0) {
+                    logger.info("{} Progress {}: Fetched={}, Enqueued={}, Skipped={}",
+                            strategy, sourceType, fetched, enqueued, skipped);
+                }
             }
+        } finally {
+            cursor.close();
+            cursor.destroy();
+        }
 
-            long duration = System.currentTimeMillis() - tStart;
-            long avgFetch = fetched > 0 ? duration / fetched : 0;
+        if (setTotalAtEnd && !ShutdownCoordinator.isShuttingDown()) {
+            stats.addTotalItems(fetched);
+        }
 
-        logger.info("PRODUCER STATS Type={} Fetched={} Enqueued={} Skipped={} AvgFetchMs={} QueueDepth={}",
-                sourceType, fetched, enqueued, skipped, avgFetch, queue.size());
+        long duration = System.currentTimeMillis() - started;
+        long avgFetch = fetched > 0 ? duration / fetched : 0;
+        logger.info("{} STATS Type={} Fetched={} Enqueued={} Skipped={} AvgFetchMs={} QueueDepth={}",
+                strategy, sourceType, fetched, enqueued, skipped, avgFetch, queue.size());
     }
 
     private String buildQuery(String sourceType) {
-        String predicate = config.getFilterPredicate();
+        return buildQuery(sourceType, config.getFilterPredicate());
+    }
+
+    static String buildQuery(String sourceType, String predicate) {
         if (predicate == null) predicate = "";
         predicate = predicate.trim();
 
@@ -307,7 +315,8 @@ public class Producer implements Runnable {
         }
 
         if (predicate.startsWith("/")) {
-            return predicate;
+            throw new IllegalArgumentException(
+                    "FILTER_PREDICATE must not replace configured ItemType: " + predicate);
         }
 
         String p = predicate;

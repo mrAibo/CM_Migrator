@@ -34,4 +34,22 @@ final class WorkerFailureState {
             throw new IllegalStateException(message, failure);
         }
     }
+
+    Runnable guard(Runnable worker, Runnable onFailure) {
+        java.util.Objects.requireNonNull(worker, "worker");
+        java.util.Objects.requireNonNull(onFailure, "onFailure");
+        return () -> {
+            try {
+                worker.run();
+            } catch (RuntimeException | Error failure) {
+                record(failure);
+                try {
+                    onFailure.run();
+                } catch (RuntimeException callbackFailure) {
+                    failure.addSuppressed(callbackFailure);
+                }
+                throw failure;
+            }
+        };
+    }
 }

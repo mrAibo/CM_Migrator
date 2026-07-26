@@ -294,6 +294,12 @@ public class ItemMigrator {
 
     public boolean deleteBatch(List<MigrationItem> batch, boolean dryRun) {
         lastError.remove();
+        try {
+            ensureDeleteMayContinue();
+        } catch (InterruptedException stopped) {
+            lastError.set(stopped);
+            return false;
+        }
         CMConnection sourceConn = null;
         long batchStartMs = System.currentTimeMillis();
     
@@ -303,6 +309,7 @@ public class ItemMigrator {
             if (!dryRun) sourceDs.startTransaction();
     
             for (MigrationItem item : batch) {
+                ensureDeleteMayContinue();
                 ThreadContext.put("itemId", item.getItemId());
     
                 if (!deleteItemInternal(item, sourceConn, dryRun)) {
@@ -310,7 +317,10 @@ public class ItemMigrator {
                 }
             }
     
-            if (!dryRun) sourceDs.commit();
+            if (!dryRun) {
+                ensureDeleteMayContinue();
+                sourceDs.commit();
+            }
     
             long elapsed = System.currentTimeMillis() - batchStartMs;
             totalDeleteMs.addAndGet(elapsed);
@@ -368,6 +378,7 @@ public class ItemMigrator {
             logger.debug("DELETING item: {}", pidString);
         }
 
+        ensureDeleteMayContinue();
         sourceItem.del();
         sourceConn.markUsed();
         sourceItem = null;
@@ -376,6 +387,12 @@ public class ItemMigrator {
 
     public boolean delete(MigrationItem item, boolean dryRun) {
         return deleteBatch(List.of(item), dryRun);
+    }
+
+    private static void ensureDeleteMayContinue() throws InterruptedException {
+        if (ShutdownCoordinator.isShuttingDown() || Thread.currentThread().isInterrupted()) {
+            throw new InterruptedException("Delete stopped by shutdown request");
+        }
     }
 
     private static AttrInfo getAttrInfo(DKDDO dest, String destItemType, String name) {

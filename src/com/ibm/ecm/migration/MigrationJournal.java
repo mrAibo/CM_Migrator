@@ -332,22 +332,40 @@ public class MigrationJournal implements AutoCloseable {
     private boolean writeBatchToDb(String itemType, java.util.List<JournalEntry> entries) {
         try (Connection conn = getConnection(itemType)) {
             conn.setAutoCommit(false);
-            String sql = "MERGE INTO AUDIT_LOG (ITEM_ID, ITEM_TYPE, STATUS, CHECKSUM, DEST_ITEM_ID, MESSAGE, MIGRATION_TIME) " +
-                         "KEY(ITEM_ID) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)";
-            
-            try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            String mergeSql = "MERGE INTO AUDIT_LOG (ITEM_ID, ITEM_TYPE, STATUS, CHECKSUM, DEST_ITEM_ID, MESSAGE, MIGRATION_TIME) " +
+                              "KEY(ITEM_ID) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)";
+            String deleteSql = "UPDATE AUDIT_LOG SET ITEM_TYPE=?, STATUS=?, MESSAGE=?, MIGRATION_TIME=CURRENT_TIMESTAMP " +
+                               "WHERE ITEM_ID=?";
+
+            try (PreparedStatement merge = conn.prepareStatement(mergeSql);
+                 PreparedStatement deletion = conn.prepareStatement(deleteSql)) {
+                java.util.List<JournalEntry> deletions = new java.util.ArrayList<>();
+
                 for (JournalEntry entry : entries) {
-                    pstmt.setString(1, entry.itemId);
-                    pstmt.setString(2, entry.itemType);
-                    pstmt.setString(3, entry.status);
-                    pstmt.setString(4, entry.checksum);
-                    pstmt.setString(5, entry.destItemId);
-                    String msg = entry.message;
-                    if (msg != null && msg.length() > 4000) msg = msg.substring(0, 3997) + "...";
-                    pstmt.setString(6, msg);
-                    pstmt.addBatch();
+                    if ("DELETED".equals(entry.status)) {
+                        deletion.setString(1, entry.itemType);
+                        deletion.setString(2, entry.status);
+                        deletion.setString(3, truncateMessage(entry.message));
+                        deletion.setString(4, entry.itemId);
+                        deletion.addBatch();
+                        deletions.add(entry);
+                    } else {
+                        bindMerge(merge, entry);
+                        merge.addBatch();
+                    }
                 }
-                pstmt.executeBatch();
+
+                merge.executeBatch();
+                merge.clearBatch();
+                int[] updated = deletion.executeBatch();
+                for (int i = 0; i < updated.length; i++) {
+                    if (updated[i] == 0) {
+                        bindMerge(merge, deletions.get(i));
+                        merge.addBatch();
+                    }
+                }
+                merge.executeBatch();
+
                 conn.commit();
                 persistedWrites.addAndGet(entries.size());
                 return true;
@@ -360,6 +378,21 @@ public class MigrationJournal implements AutoCloseable {
             logger.error("Could not get journal connection for " + itemType, e);
             return false;
         }
+    }
+
+    private static void bindMerge(PreparedStatement statement, JournalEntry entry) throws SQLException {
+        statement.setString(1, entry.itemId);
+        statement.setString(2, entry.itemType);
+        statement.setString(3, entry.status);
+        statement.setString(4, entry.checksum);
+        statement.setString(5, entry.destItemId);
+        statement.setString(6, truncateMessage(entry.message));
+    }
+
+    private static String truncateMessage(String message) {
+        return message != null && message.length() > 4000
+                ? message.substring(0, 3997) + "..."
+                : message;
     }
 
     /**

@@ -3,6 +3,7 @@ package com.ibm.ecm.migration;
 import java.io.File;
 import java.nio.file.*;
 import java.lang.reflect.Field;
+import java.sql.*;
 import java.util.concurrent.*;
 
 /**
@@ -18,6 +19,7 @@ public final class MigrationJournalFailClosedTest {
         System.out.println();
 
         testSuccessfulPersistenceAndResume();
+        testDeletionPreservesMigrationProvenance();
         testCacheConsistency();
         testCloseDrainsQueue();
         testCloseFailsOnWriterFailure();
@@ -125,6 +127,46 @@ public final class MigrationJournalFailClosedTest {
             assertTrue(!j2.isMigrated("no-such", "TYPE_A"), "non-existent item returns false");
 
             j2.close();
+        } finally {
+            deleteDir(tmp.toFile());
+        }
+    }
+
+    /** A later source deletion must not erase destination/checksum evidence. */
+    static void testDeletionPreservesMigrationProvenance() throws Exception {
+        System.out.println("--- testDeletionPreservesMigrationProvenance ---");
+
+        Path tmp = Files.createTempDirectory("journal-test-");
+        try {
+            MigrationJournal journal = new MigrationJournal(tmp.toString());
+            journal.init();
+            journal.logSuccess("item-1", "TYPE_A", "sha256-aa", "dest-1");
+            drain(journal);
+            journal.logDeletion("item-1", "TYPE_A", "Deleted successfully");
+            journal.logDeletion("item-2", "TYPE_A", "Standalone delete");
+            drain(journal);
+            journal.close();
+
+            try (Connection conn = DriverManager.getConnection(
+                        "jdbc:h2:" + tmp.resolve("journal_TYPE_A"), "sa", "");
+                 PreparedStatement ps = conn.prepareStatement(
+                        "SELECT STATUS, CHECKSUM, DEST_ITEM_ID FROM AUDIT_LOG WHERE ITEM_ID = ?")) {
+                ps.setString(1, "item-1");
+                try (ResultSet rs = ps.executeQuery()) {
+                    assertTrue(rs.next(), "deleted journal row exists");
+                    assertTrue("DELETED".equals(rs.getString("STATUS")), "status is DELETED");
+                    assertTrue("sha256-aa".equals(rs.getString("CHECKSUM")), "checksum is preserved");
+                    assertTrue("dest-1".equals(rs.getString("DEST_ITEM_ID")), "destination PID is preserved");
+                }
+
+                ps.setString(1, "item-2");
+                try (ResultSet rs = ps.executeQuery()) {
+                    assertTrue(rs.next(), "standalone deleted journal row exists");
+                    assertTrue("DELETED".equals(rs.getString("STATUS")), "standalone status is DELETED");
+                    assertTrue(rs.getString("CHECKSUM") == null, "standalone checksum remains empty");
+                    assertTrue(rs.getString("DEST_ITEM_ID") == null, "standalone destination remains empty");
+                }
+            }
         } finally {
             deleteDir(tmp.toFile());
         }

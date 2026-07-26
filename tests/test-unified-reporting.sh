@@ -71,6 +71,7 @@ srcs=(
     src/com/ibm/ecm/migration/OperatorConsole.java
     # Renderer + delivery
     src/com/ibm/ecm/migration/ReportRenderer.java
+    src/com/ibm/ecm/migration/AuditProtocolGenerator.java
     src/com/ibm/ecm/migration/ReportDeliveryService.java
     # Collector
     src/com/ibm/ecm/migration/ReportDataCollector.java

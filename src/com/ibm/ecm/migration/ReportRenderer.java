@@ -3,274 +3,256 @@ package com.ibm.ecm.migration;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * Renders UnifiedReport to HTML — full report + compact email body.
- * Offline-compatible: no external fonts, CSS, or JS.
- */
-public class ReportRenderer {
+/** Renders UnifiedReport to offline HTML and an Outlook-safe email body. */
+public final class ReportRenderer {
 
     private static final String VERSION = OperatorConsole.VERSION;
 
-    // ---- embedded CSS (offline-safe) ----
-    // ponytail: concatenation instead of text block for JDK 11 compatibility
-    private static final String CSS = "\n"
-            + "<style>\n"
-            + "body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;\n"
-            + "  background:#f8fafc;color:#1e293b;margin:0;padding:20px;line-height:1.5}\n"
-            + ".container{max-width:1000px;margin:0 auto;background:#fff;border:1px solid #e2e8f0;\n"
-            + "  border-radius:8px;overflow:hidden}\n"
-            + ".head{padding:24px 30px;background:#0f172a;color:#fff}\n"
-            + ".head h1{margin:0;font-size:1.4rem;font-weight:600}\n"
-            + ".head .sub{font-size:.8rem;color:#94a3b8;margin-top:4px}\n"
-            + ".badge{display:inline-block;padding:3px 12px;border-radius:99px;font-size:.75rem;\n"
-            + "  font-weight:700;letter-spacing:1px}\n"
-            + ".badge.ok{background:#dcfce7;color:#166534}\n"
-            + ".badge.err{background:#fef2f2;color:#991b1b}\n"
-            + ".badge.warn{background:#fffbeb;color:#92400e}\n"
-            + ".kpis{display:flex;flex-wrap:wrap;gap:1px;background:#e2e8f0;border-bottom:3px solid #f97316}\n"
-            + ".kpi{flex:1 1 130px;background:#fff;padding:18px 14px;text-align:center}\n"
-            + ".kpi .v{font-size:1.6rem;font-weight:700}\n"
-            + ".kpi .l{font-size:.65rem;color:#64748b;text-transform:uppercase;letter-spacing:1px;margin-top:4px}\n"
-            + ".section{padding:20px 30px}\n"
-            + ".section h2{font-size:1rem;border-bottom:2px solid #e2e8f0;padding-bottom:6px;margin-bottom:12px}\n"
-            + "table{width:100%;border-collapse:collapse;font-size:.85rem}\n"
-            + "th,td{padding:8px 10px;text-align:left;border-bottom:1px solid #e2e8f0}\n"
-            + "th{background:#f1f5f9;font-weight:600;text-transform:uppercase;font-size:.7rem;letter-spacing:.5px}\n"
-            + ".card{border:1px solid #e2e8f0;border-radius:6px;margin-bottom:12px}\n"
-            + ".card-head{padding:10px 16px;background:#f8fafc;font-weight:600;border-bottom:1px solid #e2e8f0}\n"
-            + ".card-body{padding:12px 16px;display:flex;flex-wrap:wrap;gap:16px}\n"
-            + ".card-body .stat{flex:0 0 auto}\n"
-            + ".card-body .stat .v{font-size:1.1rem;font-weight:700}\n"
-            + ".card-body .stat .l{font-size:.6rem;color:#64748b}\n"
-            + ".err{color:#dc2626}.ok{color:#16a34a}.warn{color:#f59e0b}.muted{color:#94a3b8}\n"
+    // ponytail: one embedded stylesheet keeps generated reports portable and offline.
+    private static final String CSS = "\n<style>\n"
+            + "*{box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;background:#edf1f5;color:#1c2b40;margin:0;padding:22px;line-height:1.45}\n"
+            + ".container{max-width:1040px;margin:0 auto;background:#fff;border:1px solid #d6dee8}\n"
+            + ".mast{display:flex;justify-content:space-between;gap:24px;background:#142944;color:#fff;padding:25px 30px}\n"
+            + ".eyebrow{color:#b8c5d5;font-size:.72rem;letter-spacing:.12em;text-transform:uppercase}.mast h1{font-size:1.55rem;margin:6px 0}.sub{color:#aebdd0;font-size:.78rem}\n"
+            + ".decision{min-width:245px;background:#fff5e8;border-left:4px solid #e76617;color:#78460f;padding:13px 15px}.decision b{display:block;font-size:1.05rem;margin-bottom:4px}.decision span{font-size:.75rem}\n"
+            + ".meta{display:grid;grid-template-columns:2fr repeat(3,1fr);border-bottom:1px solid #d7dfe8}.meta div{padding:12px 16px;border-right:1px solid #d7dfe8}.meta div:last-child{border-right:0}.meta small,.summary small{display:block;color:#758398;font-size:.65rem;text-transform:uppercase;letter-spacing:.08em}.meta b{font-size:.8rem}\n"
+            + ".body{padding:22px 30px}.priority{display:grid;grid-template-columns:1fr 1.4fr;gap:14px;margin-bottom:24px}.summary{padding:17px;border:1px solid #d4dde7}.summary.alert{background:#fdf0f0;border:0;border-left:4px solid #b93838}.summary strong{display:block;font-size:1.55rem;margin:5px 0}.summary.alert strong{color:#b93838}.progress{height:5px;background:#e1e7ee;margin-top:10px}.progress span{display:block;height:100%;background:#16794b}\n"
+            + ".section{margin:0 0 24px}.section-title{display:flex;justify-content:space-between;align-items:end;border-bottom:2px solid #d4dde7;padding-bottom:6px;margin-bottom:8px}.section-title h2{font-size:1rem;margin:0}.section-title span{font-size:.68rem;color:#768497}\n"
+            + "table{width:100%;border-collapse:collapse;font-size:.78rem}th{padding:8px 10px;text-align:left;background:#eaf0f5;color:#617085;font-size:.64rem;text-transform:uppercase;letter-spacing:.06em}td{padding:9px 10px;border-bottom:1px solid #dde4ec;vertical-align:top}.mono{font-family:Consolas,'Courier New',monospace}.bad{color:#b93838;font-weight:700}.ok{color:#16794b;font-weight:700}.muted{color:#8290a1}.severity{display:inline-block;background:#fbe5e5;color:#b93838;padding:2px 6px;font-size:.62rem;font-weight:800}\n"
+            + ".kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:#d7dfe8;margin-bottom:24px}.kpi{background:#f8fafc;padding:13px;text-align:center}.kpi b{display:block;font-size:1.05rem}.kpi small{color:#758398;font-size:.6rem;text-transform:uppercase}\n"
+            + ".footer{display:flex;justify-content:space-between;background:#f6f8fa;border-top:1px solid #d7dfe8;padding:10px 30px;color:#7b8898;font-size:.65rem}\n"
+            + "@media(max-width:720px){body{padding:0}.mast,.priority{display:block}.decision{margin-top:14px}.meta{grid-template-columns:1fr 1fr}.kpis{grid-template-columns:1fr 1fr}.body{padding:18px}.table-wrap{overflow-x:auto}}\n"
             + "</style>";
 
-    private static final String PAGE_TOP = "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"UTF-8\">"
-            + "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
-            + "<title>CM Migrator Report</title>" + CSS + "</head><body><div class=\"container\">";
-
-    private static final String PAGE_BOT = "</div></body></html>";
-
-    // =========================================================================
-    // PUBLIC API
-    // =========================================================================
+    private ReportRenderer() { }
 
     /** Full offline HTML report. */
     public static String renderFullReport(UnifiedReport r) {
-        StringBuilder sb = new StringBuilder(8192);
-        sb.append(PAGE_TOP);
-        renderHeader(sb, r);
+        List<ReportError> errors = collectAllErrors(r);
+        StringBuilder sb = new StringBuilder(12288);
+        sb.append("<!DOCTYPE html><html lang=\"de\"><head><meta charset=\"UTF-8\">"
+                + "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+                + "<title>CM Migrator Abschlussbericht</title>").append(CSS)
+                .append("</head><body><main class=\"container\">");
+
+        renderMast(sb, r);
+        renderMeta(sb, r);
+        sb.append("<div class=\"body\">");
+        renderPriority(sb, r);
+        if (!errors.isEmpty()) renderErrorTable(sb, errors);
+        renderItemTypes(sb, r.itemTypes());
         renderKpis(sb, r);
-        renderItemTypeCards(sb, r.itemTypes());
-        // Aggregate all errors from item types for error table
-        List<ReportError> allErrors = collectAllErrors(r);
-        if (!allErrors.isEmpty()) {
-            renderErrorTable(sb, allErrors);
-        }
-        sb.append(PAGE_BOT);
+        sb.append("</div><footer class=\"footer\"><span>CM Migrator ").append(VERSION)
+                .append(" · Abschlussbericht</span><span>").append(esc(r.operationId()))
+                .append("</span></footer></main></body></html>");
         return sb.toString();
     }
 
-    /** Compact, table-based HTML for email (Outlook-safe). */
+    /** Compact, table-based HTML for Outlook and mailx. */
     public static String renderEmailBody(UnifiedReport r) {
-        StringBuilder sb = new StringBuilder(4096);
-        sb.append("<!DOCTYPE html><html><head><meta charset=\"UTF-8\"></head>"
-                + "<body style=\"margin:0;padding:0;background:#f8fafc;font-family:Arial,Helvetica,sans-serif\">"
-                + "<table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\""
-                + " style=\"background:#f8fafc;padding:20px 0\">"
-                + "<tr><td align=\"center\">"
-                + "<table cellpadding=\"0\" cellspacing=\"0\" border=\"0\""
-                + " style=\"max-width:600px;width:100%;background:#fff;border:1px solid #e2e8f0\">");
+        List<ReportError> errors = collectAllErrors(r);
+        boolean review = needsReview(r);
+        StringBuilder sb = new StringBuilder(8192);
+        sb.append("<!DOCTYPE html><html lang=\"de\"><head><meta charset=\"UTF-8\"></head>"
+                + "<body style=\"margin:0;padding:0;background:#f2f5f8;font-family:Arial,Helvetica,sans-serif;color:#1c2b40\">"
+                + "<table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" style=\"background:#f2f5f8;padding:20px 0\"><tr><td align=\"center\">"
+                + "<table width=\"600\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" style=\"width:100%;max-width:600px;background:#fff;border:1px solid #d7dfe8\">");
 
-        long failed = r.failed();
-        String accent = failed > 0 ? "#ef4444" : "#10b981";
-        String badgeText = failed > 0 ? "ERRORS DETECTED" : "OPERATION SUCCESSFUL";
-        String opTypeName = r.operationType().name();
+        sb.append("<tr><td style=\"background:#142944;padding:20px 24px;color:#fff\">"
+                + "<table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\"><tr><td>"
+                + "<span style=\"display:block;color:#b8c5d5;font-size:10px;letter-spacing:1px\">CM MIGRATOR · LAUF ABGESCHLOSSEN</span>"
+                + "<span style=\"display:block;font-size:20px;font-weight:bold;margin-top:5px\">")
+                .append(esc(resultTitle(r))).append("</span><span style=\"display:block;color:#aebdd0;font-size:11px;margin-top:4px\">")
+                .append(esc(r.sourceSSID())).append(" → ").append(esc(r.destSSID())).append(" · ")
+                .append(esc(r.operationId())).append("</span></td></tr></table></td></tr>");
 
-        sb.append("<tr><td style=\"background:#0f172a;padding:20px 24px\">"
-                + "<span style=\"color:#fff;font-size:14px;font-weight:bold;letter-spacing:1px\">")
-                .append(esc(opTypeName)).append(" STATUS</span></td></tr>");
+        sb.append("<tr><td style=\"padding:14px 24px;background:")
+                .append(review ? "#fff5e8;border-left:4px solid #e76617;color:#78460f" : "#edf9f2;border-left:4px solid #16794b;color:#155f3c")
+                .append("\"><span style=\"display:block;font-size:16px;font-weight:bold\">")
+                .append(review ? "Prüfung erforderlich" : "Freigabebereit")
+                .append("</span><span style=\"font-size:11px\">")
+                .append(review
+                        ? n(r.failed()) + " Abweichungen vor Freigabe bearbeiten."
+                        : "Keine offenen technischen Abweichungen.")
+                .append("</span></td></tr>");
 
-        sb.append("<tr><td style=\"background:").append(accent).append("15;padding:16px 24px;"
-                + "border-left:4px solid ").append(accent).append("\">"
-                + "<span style=\"font-size:16px;font-weight:bold;color:").append(accent).append("\">")
-                .append(esc(badgeText)).append("</span></td></tr>");
+        sb.append("<tr><td style=\"padding:18px 24px\"><table width=\"100%\" cellpadding=\"0\" cellspacing=\"8\"><tr>")
+                .append(mailKpi(n(r.total()), "TOTAL", "#1c2b40"))
+                .append(mailKpi(n(r.success()), "SUCCESS", "#16794b"))
+                .append(mailKpi(n(r.failed()), "FAILED", review ? "#b93838" : "#758398"))
+                .append(mailKpi(r.formattedDuration(), "DURATION", "#1c2b40"))
+                .append("</tr></table></td></tr>");
 
-        // KPIs
-        sb.append("<tr><td style=\"padding:20px 24px\">"
-                + "<table width=\"100%\" cellpadding=\"0\" cellspacing=\"8\" border=\"0\">"
-                + "<tr>"
-                + "<td style=\"background:#f8fafc;padding:12px;border:1px solid #e2e8f0\">"
-                + "<span style=\"font-size:24px;font-weight:bold\">").append(n(r.total())).append("</span><br>"
-                + "<span style=\"font-size:10px;color:#64748b\">TOTAL</span></td>"
-                + "<td style=\"background:#f8fafc;padding:12px;border:1px solid #e2e8f0\">"
-                + "<span style=\"font-size:24px;font-weight:bold;color:#16a34a\">").append(n(r.success())).append("</span><br>"
-                + "<span style=\"font-size:10px;color:#64748b\">SUCCESS</span></td>"
-                + "</tr><tr>"
-                + "<td style=\"background:#f8fafc;padding:12px;border:1px solid #e2e8f0\">"
-                + "<span style=\"font-size:24px;font-weight:bold;color:").append(failed > 0 ? "#ef4444" : "#64748b").append("\">")
-                .append(n(failed)).append("</span><br>"
-                + "<span style=\"font-size:10px;color:#64748b\">FAILED</span></td>"
-                + "<td style=\"background:#f8fafc;padding:12px;border:1px solid #e2e8f0\">"
-                + "<span style=\"font-size:24px;font-weight:bold\">").append(r.formattedDuration()).append("</span><br>"
-                + "<span style=\"font-size:10px;color:#64748b\">DURATION</span></td>"
-                + "</tr></table></td></tr>");
-
-        // Item types summary
-        sb.append("<tr><td style=\"padding:8px 24px 16px\">"
-                + "<span style=\"font-size:11px;color:#64748b;font-weight:bold\">ITEM TYPES</span><br>");
-        for (ItemTypeResult it : r.itemTypes()) {
-            sb.append("<span style=\"font-size:12px;font-family:monospace\">")
-                    .append(esc(it.sourceType())).append(" \u2192 ").append(esc(it.destType()))
-                    .append(" (").append(n(it.success())).append("/").append(n(it.total())).append(")</span><br>");
+        if (review) {
+            sb.append("<tr><td style=\"padding:0 24px 14px\"><table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background:#fff8ed;border:1px solid #ead5b4\"><tr><td style=\"padding:11px 13px;color:#704b17;font-size:11px\">"
+                    + "<b style=\"display:block;color:#4e3210;margin-bottom:4px\">Nächster Schritt</b>"
+                    + "Betroffene Objekte im Zielsystem prüfen, anschließend Einzel-Retry ausführen und das Prüfprotokoll freigeben."
+                    + "</td></tr></table></td></tr>");
         }
-        sb.append("</td></tr>");
 
-        // Errors (max 5 from global list)
-        List<ReportError> globErrs = r.errors();
-        if (!globErrs.isEmpty()) {
-            sb.append("<tr><td style=\"padding:8px 24px 16px\">"
-                    + "<span style=\"font-size:11px;color:#ef4444;font-weight:bold\">RECENT ERRORS</span><br>");
-            int max = Math.min(globErrs.size(), 5);
+        if (!errors.isEmpty()) {
+            sb.append("<tr><td style=\"padding:4px 24px 16px\"><span style=\"font-size:11px;font-weight:bold;color:#263950\">OFFENE ABWEICHUNGEN</span>"
+                    + "<table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"margin-top:6px\">");
+            int max = Math.min(errors.size(), 5);
             for (int i = 0; i < max; i++) {
-                ReportError re = globErrs.get(i);
-                sb.append("<span style=\"font-size:11px;color:#b91c1c\">")
-                        .append(esc(re.itemType())).append(" / ").append(esc(re.itemId()))
-                        .append(": ").append(esc(trunc(re.message(), 80)))
-                        .append("</span><br>");
+                ReportError error = errors.get(i);
+                sb.append("<tr><td style=\"padding:8px 0;border-bottom:1px solid #e1e7ee;font-size:11px\"><b style=\"color:#253950\">")
+                        .append(esc(error.itemType())).append(" / ").append(esc(error.itemId()))
+                        .append("</b><br><span style=\"color:#6d7b8c\">").append(esc(trunc(error.message(), 100)))
+                        .append(" · Objekt prüfen und erneut migrieren</span></td></tr>");
             }
-            if (globErrs.size() > 5) {
-                sb.append("<span style=\"font-size:10px;color:#94a3b8\">... and ")
-                        .append(globErrs.size() - 5).append(" more</span><br>");
+            if (errors.size() > max) {
+                sb.append("<tr><td style=\"padding-top:6px;color:#8190a2;font-size:10px\">… und ")
+                        .append(errors.size() - max).append(" weitere</td></tr>");
             }
-            sb.append("</td></tr>");
+            sb.append("</table></td></tr>");
         }
 
-        // Footer
-        sb.append("<tr><td style=\"background:#0f172a;padding:12px 24px;text-align:center\">"
-                + "<span style=\"color:#94a3b8;font-size:10px;letter-spacing:1px\">CM MIGRATOR v")
-                .append(VERSION).append(" \u2014 AUTO-GENERATED</span></td></tr>");
-
-        sb.append("</table></td></tr></table></body></html>");
+        sb.append("<tr><td style=\"padding:4px 24px 18px\"><span style=\"font-size:11px;font-weight:bold;color:#263950\">ERGEBNIS NACH ITEMTYPE</span>"
+                + "<table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"margin-top:6px\">");
+        for (ItemTypeResult it : r.itemTypes()) {
+            sb.append("<tr><td style=\"padding:6px 0;border-bottom:1px solid #e1e7ee;font-family:monospace;font-size:11px\">")
+                    .append(esc(it.sourceType())).append(" → ").append(esc(it.destType()))
+                    .append("</td><td align=\"right\" style=\"padding:6px 0;border-bottom:1px solid #e1e7ee;font-size:11px\">")
+                    .append(n(it.success())).append(" / ").append(n(it.total())).append("</td></tr>");
+        }
+        sb.append("</table></td></tr><tr><td style=\"background:#142944;padding:11px 24px;text-align:center;color:#98a9bd;font-size:10px;letter-spacing:1px\">CM MIGRATOR ")
+                .append(VERSION).append(" · AUTOMATISCHE BETRIEBSNACHRICHT</td></tr>"
+                        + "</table></td></tr></table></body></html>");
         return sb.toString();
     }
 
-    /** Email subject line — no emojis. */
+    /** Decision-first email subject line without emoji. */
     public static String emailSubject(UnifiedReport r) {
-        long failed = r.failed();
-        String outcome = failed > 0 ? "FAILED" : "SUCCESS";
-        String src = r.sourceSSID() != null ? r.sourceSSID() : "SOURCE";
-        String dst = r.destSSID() != null ? r.destSSID() : "DEST";
-        String label = r.operationType().name();
-
-        if (failed > 0) {
-            return String.format("[CM Migrator] %s %s \u2014 %d errors \u2014 %s \u2192 %s",
-                    outcome, label, failed, src, dst);
+        String decision = needsReview(r) ? "PRÜFUNG" : "ERFOLGREICH";
+        if (needsReview(r)) {
+            return String.format("[CM Migrator] %s %s — %d Abweichungen — %s → %s",
+                    decision, r.operationType().name(), r.failed(), safe(r.sourceSSID(), "SOURCE"), safe(r.destSSID(), "DEST"));
         }
-        return String.format("[CM Migrator] %s %s \u2014 %,d objects \u2014 %s \u2192 %s",
-                outcome, label, r.success(), src, dst);
+        return String.format("[CM Migrator] %s %s — %,d Objekte — %s → %s",
+                decision, r.operationType().name(), r.success(), safe(r.sourceSSID(), "SOURCE"), safe(r.destSSID(), "DEST"));
     }
 
-    // =========================================================================
-    // INTERNAL
-    // =========================================================================
-
-    private static void renderHeader(StringBuilder sb, UnifiedReport r) {
-        long failed = r.failed();
-        String badgeClass = failed > 0 ? "err" : "ok";
-        String badgeText = failed > 0 ? "ERRORS" : "SUCCESS";
-        sb.append("<div class=\"head\"><h1>")
-                .append(esc(r.operationType().name())).append(" REPORT</h1>")
-                .append("<div class=\"sub\">").append(esc(r.operationId())).append(" | ")
-                .append(r.formattedDuration()).append(" | ").append(r.itemTypes().size()).append(" item types</div>")
-                .append("<span class=\"badge ").append(badgeClass).append("\">").append(badgeText).append("</span>")
-                .append("</div>");
+    private static void renderMast(StringBuilder sb, UnifiedReport r) {
+        boolean review = needsReview(r);
+        sb.append("<header class=\"mast\"><div><div class=\"eyebrow\">CM Migrator · Abschlussbericht</div><h1>")
+                .append(esc(resultTitle(r))).append("</h1><div class=\"sub\">")
+                .append(esc(r.sourceSSID())).append(" → ").append(esc(r.destSSID())).append(" · Run ")
+                .append(esc(r.operationId())).append("</div></div><div class=\"decision\"><b>")
+                .append(review ? "Prüfung erforderlich" : "Freigabebereit").append("</b><span>")
+                .append(review ? n(r.failed()) + " Abweichungen vor Freigabe bearbeiten" : "Keine offenen technischen Abweichungen")
+                .append("</span></div></header>");
     }
 
-    private static void renderKpis(StringBuilder sb, UnifiedReport r) {
-        long failed = r.failed();
-        sb.append("<div class=\"kpis\">");
-        kpi(sb, n(r.total()), "TOTAL", "");
-        kpi(sb, n(r.success()), "SUCCESS", "ok");
-        kpi(sb, n(failed), "FAILED", failed > 0 ? "err" : "muted");
-        kpi(sb, n(r.skipped()), "SKIPPED", "muted");
-        if (r.deleted() > 0) kpi(sb, n(r.deleted()), "DELETED", "muted");
-        kpi(sb, String.format("%.1f/s", r.throughputPerSec()), "THROUGHPUT", "");
-        kpi(sb, String.format("%.1f%%", r.successRate()), "SUCCESS RATE", r.successRate() >= 99 ? "ok" : "");
-        kpi(sb, r.formattedDuration(), "DURATION", "");
-        sb.append("</div>");
+    private static void renderMeta(StringBuilder sb, UnifiedReport r) {
+        sb.append("<section class=\"meta\"><div><small>Geltungsbereich</small><b>")
+                .append(r.itemTypes().size()).append(" ItemTypes · ").append(esc(r.operationType().name()))
+                .append("</b></div><div><small>Dauer</small><b>").append(esc(r.formattedDuration()))
+                .append("</b></div><div><small>Durchsatz</small><b>").append(String.format("%.1f/s", r.throughputPerSec()))
+                .append("</b></div><div><small>Version</small><b>").append(VERSION).append("</b></div></section>");
     }
 
-    private static void kpi(StringBuilder sb, String val, String label, String cls) {
-        sb.append("<div class=\"kpi\"><div class=\"v ").append(cls).append("\">")
-                .append(esc(val)).append("</div><div class=\"l\">").append(esc(label)).append("</div></div>");
-    }
-
-    private static void renderItemTypeCards(StringBuilder sb, List<ItemTypeResult> items) {
-        sb.append("<div class=\"section\"><h2>Per Item-Type Detail</h2>");
-        for (ItemTypeResult it : items) {
-            sb.append("<div class=\"card\">");
-            sb.append("<div class=\"card-head\">").append(esc(it.sourceType()))
-                    .append(" \u2192 ").append(esc(it.destType())).append("</div>");
-            sb.append("<div class=\"card-body\">");
-            stat(sb, n(it.total()), "TOTAL", "");
-            stat(sb, n(it.success()), "SUCCESS", "ok");
-            stat(sb, n(it.failed()), "FAILED", it.failed() > 0 ? "err" : "muted");
-            stat(sb, n(it.skipped()), "SKIPPED", "muted");
-            if (it.deleted() > 0) stat(sb, n(it.deleted()), "DELETED", "muted");
-            if (it.verified() >= 0) stat(sb, n(it.verified()), "VERIFIED", "ok");
-            if (it.mismatches() > 0) stat(sb, n(it.mismatches()), "MISMATCHES", "err");
-            if (it.orphaned() > 0) stat(sb, n(it.orphaned()), "ORPHANED", "err");
-            sb.append("</div></div>");
-        }
-        sb.append("</div>");
-    }
-
-    private static void stat(StringBuilder sb, String val, String label, String cls) {
-        sb.append("<div class=\"stat\"><div class=\"v ").append(cls).append("\">")
-                .append(esc(val)).append("</div><div class=\"l\">").append(esc(label)).append("</div></div>");
+    private static void renderPriority(StringBuilder sb, UnifiedReport r) {
+        sb.append("<section class=\"priority\"><div class=\"summary alert\"><small>Offene Abweichungen</small><strong>")
+                .append(n(r.failed())).append("</strong><span>")
+                .append(r.failed() > 0 ? "Bearbeitung vor Freigabe erforderlich" : "Keine offenen Fehler")
+                .append("</span></div><div class=\"summary\"><small>Erfolgreich verarbeitet</small><strong>")
+                .append(n(r.success())).append(" / ").append(n(r.total())).append("</strong><div class=\"progress\"><span style=\"width:")
+                .append(Math.max(0.0, Math.min(100.0, r.successRate()))).append("%\"></span></div></div></section>");
     }
 
     private static void renderErrorTable(StringBuilder sb, List<ReportError> errors) {
-        sb.append("<div class=\"section\"><h2>Errors</h2>"
-                + "<table><thead><tr>"
-                + "<th>Item Type</th><th>Item ID</th><th>Status</th><th>Message</th><th>Timestamp</th>"
-                + "</tr></thead><tbody>");
-        for (ReportError re : errors) {
-            sb.append("<tr>")
-                    .append("<td>").append(esc(re.itemType())).append("</td>")
-                    .append("<td>").append(esc(re.itemId())).append("</td>")
-                    .append("<td>").append(esc(re.status())).append("</td>")
-                    .append("<td class=\"err\">").append(esc(trunc(re.message(), 100))).append("</td>")
-                    .append("<td>").append(esc(re.timestamp())).append("</td>")
-                    .append("</tr>");
+        sb.append("<section class=\"section\"><div class=\"section-title\"><h2>Prüfpflichtige Objekte</h2><span>")
+                .append(errors.size()).append(" Einträge</span></div><div class=\"table-wrap\"><table><thead><tr>"
+                        + "<th>Priorität</th><th>Objekt</th><th>Ursache</th><th>Nächster Schritt</th></tr></thead><tbody>");
+        for (ReportError error : errors) {
+            sb.append("<tr><td><span class=\"severity\">FEHLER</span></td><td class=\"mono\">")
+                    .append(esc(error.itemId())).append("</td><td>").append(esc(trunc(error.message(), 140)))
+                    .append("</td><td>Objekt prüfen und erneut migrieren</td></tr>");
         }
-        sb.append("</tbody></table></div>");
+        sb.append("</tbody></table></div></section>");
     }
 
-    /** Collect all errors from every item type for the error table. */
-    private static List<ReportError> collectAllErrors(UnifiedReport r) {
+    private static void renderItemTypes(StringBuilder sb, List<ItemTypeResult> items) {
+        sb.append("<section class=\"section\"><div class=\"section-title\"><h2>Ergebnis nach ItemType</h2><span>vollständige Statistik</span></div>"
+                + "<div class=\"table-wrap\"><table><thead><tr><th>Mapping</th><th>Erfolg</th><th>Fehler</th><th>Übersprungen</th><th>Verifikation</th></tr></thead><tbody>");
+        for (ItemTypeResult it : items) {
+            sb.append("<tr><td class=\"mono\">").append(esc(it.sourceType())).append(" → ").append(esc(it.destType()))
+                    .append("</td><td class=\"ok\">").append(n(it.success())).append(" / ").append(n(it.total()))
+                    .append("</td><td class=\"").append(it.failed() > 0 ? "bad" : "muted").append("\">")
+                    .append(n(Math.max(0, it.failed()))).append("</td><td>").append(n(Math.max(0, it.skipped())))
+                    .append("</td><td>").append(it.verified() >= 0 ? n(it.verified()) : "Nicht ausgeführt")
+                    .append("</td></tr>");
+        }
+        sb.append("</tbody></table></div></section>");
+    }
+
+    private static void renderKpis(StringBuilder sb, UnifiedReport r) {
+        sb.append("<section class=\"section\"><div class=\"section-title\"><h2>Technische Kennzahlen</h2><span>vollständiger Lauf</span></div><div class=\"kpis\">");
+        kpi(sb, n(r.total()), "TOTAL");
+        kpi(sb, n(r.success()), "SUCCESS");
+        kpi(sb, n(r.failed()), "FAILED");
+        kpi(sb, n(r.skipped()), "SKIPPED");
+        kpi(sb, String.format("%.1f/s", r.throughputPerSec()), "THROUGHPUT");
+        kpi(sb, String.format("%.1f%%", r.successRate()), "SUCCESS RATE");
+        kpi(sb, r.formattedDuration(), "DURATION");
+        kpi(sb, String.valueOf(r.itemTypes().size()), "ITEM TYPES");
+        sb.append("</div></section>");
+    }
+
+    private static void kpi(StringBuilder sb, String value, String label) {
+        sb.append("<div class=\"kpi\"><b>").append(esc(value)).append("</b><small>").append(esc(label)).append("</small></div>");
+    }
+
+    private static String mailKpi(String value, String label, String color) {
+        return "<td width=\"25%\" style=\"padding:10px 5px;text-align:center;background:#f8fafc;border:1px solid #e1e7ee\">"
+                + "<span style=\"display:block;font-size:16px;font-weight:bold;color:" + color + "\">" + esc(value) + "</span>"
+                + "<span style=\"font-size:8px;color:#758398\">" + esc(label) + "</span></td>";
+    }
+
+    private static String resultTitle(UnifiedReport r) {
+        String operation;
+        switch (r.operationType()) {
+            case VERIFICATION: operation = "Verifikation"; break;
+            case DELETE: operation = "Löschung"; break;
+            default: operation = "Migration"; break;
+        }
+        if (needsReview(r)) return operation + " mit Abweichungen abgeschlossen";
+        return operation + " erfolgreich abgeschlossen";
+    }
+
+    private static boolean needsReview(UnifiedReport r) {
+        return r.status() != OverallStatus.SUCCESS || r.failed() > 0;
+    }
+
+    private static String safe(String value, String fallback) {
+        return value == null || value.isEmpty() ? fallback : value;
+    }
+
+    /** Collect all distinct errors from the report and its item-type details. */
+    static List<ReportError> collectAllErrors(UnifiedReport r) {
         List<ReportError> all = new ArrayList<>(r.errors());
         for (ItemTypeResult it : r.itemTypes()) {
-            for (ReportError re : it.errors()) {
-                if (!all.contains(re)) all.add(re);
+            for (ReportError error : it.errors()) {
+                if (!all.contains(error)) all.add(error);
             }
         }
         return all;
     }
 
-    // ---- helpers ----
-
-    static String n(long v) { return String.format("%,d", v); }
-
-    static String esc(String s) {
-        if (s == null) return "";
-        return s.replace("&", "&amp;").replace("<", "&lt;")
-                .replace(">", "&gt;").replace("\"", "&quot;");
+    static String n(long value) {
+        return String.format("%,d", value);
     }
 
-    static String trunc(String s, int max) {
-        if (s == null) return "";
-        return s.length() <= max ? s : s.substring(0, max - 3) + "...";
+    static String esc(String value) {
+        if (value == null) return "";
+        return value.replace("&", "&amp;").replace("<", "&lt;")
+                .replace(">", "&gt;").replace("\"", "&quot;").replace("'", "&#39;");
+    }
+
+    static String trunc(String value, int max) {
+        if (value == null) return "";
+        if (max <= 3) return value.length() <= max ? value : value.substring(0, Math.max(0, max));
+        return value.length() <= max ? value : value.substring(0, max - 3) + "...";
     }
 }

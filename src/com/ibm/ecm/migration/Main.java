@@ -150,11 +150,13 @@ public class Main {
         // Start Producer & Consumers
         synchronized (current) { current.phase = OperatorConsole.Phase.DISCOVERING; }
         Producer producer = new Producer(queue, config, journal, stats, workerFailureState);
-        workerExecutor.submit(producer);
+        workerExecutor.submit(workerFailureState.guard(
+                producer, ShutdownCoordinator::requestShutdown));
 
         for (int i = 0; i < threadCount; i++) {
             Consumer consumer = new Consumer(queue, new ItemMigrator(pool), journal, stats, config);
-            workerExecutor.submit(consumer);
+            workerExecutor.submit(workerFailureState.guard(
+                    consumer, ShutdownCoordinator::requestShutdown));
         }
 
         // ─── Bounded two-stage wait ───
@@ -185,14 +187,16 @@ public class Main {
                     workersTerminated, null);
         }
 
-        aborted = terminalOutcome != null
-                || ShutdownCoordinator.isShuttingDown()
-                || workerFailureState.hasFailure();
-        if (terminalOutcome == null && ShutdownCoordinator.isShuttingDown()) {
+        if (terminalOutcome == null && workerFailureState.hasFailure()) {
+            terminalOutcome = new RunTerminationException(
+                    RunTerminationException.Reason.FAILED,
+                    "Migration worker failed.", workersTerminated, workerFailureState.get());
+        } else if (terminalOutcome == null && ShutdownCoordinator.isShuttingDown()) {
             terminalOutcome = new RunTerminationException(
                     RunTerminationException.Reason.INTERRUPTED,
                     "Migration stopped by shutdown request.", workersTerminated, null);
         }
+        aborted = terminalOutcome != null;
 
         // ─── Journal close before reports (PR #13 invariant) ───
         journalClosed = false;
@@ -243,6 +247,14 @@ public class Main {
             }
         } else {
             logger.warn("Migration did not complete normally. Skipping reports and email.");
+        }
+
+        if (terminalOutcome == null && stats.getFailedItems() > 0) {
+            terminalOutcome = new RunTerminationException(
+                    RunTerminationException.Reason.FAILED,
+                    "Migration completed with " + stats.getFailedItems() + " failed item(s).",
+                    workersTerminated, null);
+            aborted = true;
         }
 
         if (workersTerminated) {

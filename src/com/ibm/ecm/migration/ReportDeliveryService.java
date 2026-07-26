@@ -53,7 +53,19 @@ public class ReportDeliveryService {
         }
         logger.info("Report written to {}", reportPath);
 
-        // 3. Write errors.csv (configurable — issue 8)
+        // 3. Write the unified A4 audit protocol beside the report.
+        String protocolPath = new File(dir, "pruefprotokoll.html").getAbsolutePath();
+        try (PrintWriter w = new PrintWriter(
+                new FileOutputStream(protocolPath), false, StandardCharsets.UTF_8)) {
+            w.print(AuditProtocolGenerator.render(report));
+        } catch (Exception e) {
+            logger.error("Failed to write pruefprotokoll.html: {}", e.getMessage(), e);
+            return new DeliveryResult(false, false, "none",
+                    "Failed to write audit protocol: " + e.getMessage(), reportPath);
+        }
+        logger.info("Audit protocol written to {}", protocolPath);
+
+        // 4. Write errors.csv (configurable — issue 8)
         boolean csvEnabled = !"false".equalsIgnoreCase(
                 config.getProperty("REPORT_ERROR_CSV", "true"));
         List<ReportError> allErrors = new ArrayList<>(report.errors());
@@ -124,6 +136,7 @@ public class ReportDeliveryService {
         List<String> attachments = new ArrayList<>();
         if (attachEnabled) {
             attachments.add(reportPath);
+            attachments.add(protocolPath);
             if (errorsCsvPath != null) {
                 attachments.add(errorsCsvPath);
             }

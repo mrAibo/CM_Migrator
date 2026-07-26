@@ -42,26 +42,26 @@ public final class JournalCMETest {
             j.init();
 
             for (int i = 0; i < 10; i++) j.logSuccess("item-" + i, "TYPE", "sha", "dest");
-            // Before drain: counter still 0 (writes not committed yet)
-            check("before-drain-zero", j.getPersistedWritesThisRun() == 0);
+            // The writer is asynchronous; before waiting, any value up to 10 is valid.
+            check("before-drain-not-overcounted", j.getPersistedWritesThisRun() <= 10);
 
-            drain(j);
+            awaitPersisted(j, 10);
             // After drain: writer committed, counter = 10
             check("after-drain-10", j.getPersistedWritesThisRun() == 10);
 
             // More writes
             for (int i = 10; i < 25; i++) j.logSuccess("item-" + i, "TYPE", "sha", "dest");
-            drain(j);
+            awaitPersisted(j, 25);
             check("cumulative-25", j.getPersistedWritesThisRun() == 25);
 
             // Failures also go through writeBatchToDb + commit → they DO increment
             j.logFailure("fail-1", "TYPE", "simulated error");
-            drain(j);
+            awaitPersisted(j, 26);
             check("failure-also-increments", j.getPersistedWritesThisRun() == 26);
 
             // Skipped merge entries also committed
             for (int i = 0; i < 3; i++) j.logSkipped("skip-" + i, "TYPE", "already-processed");
-            drain(j);
+            awaitPersisted(j, 29);
             check("skipped-increment", j.getPersistedWritesThisRun() == 29);
 
             j.close();
@@ -76,7 +76,7 @@ public final class JournalCMETest {
             MigrationJournal j1 = new MigrationJournal(tmp.toString());
             j1.init();
             for (int i = 0; i < 20; i++) j1.logSuccess("old-" + i, "TYPE_A", "sha", "dest");
-            drain(j1);
+            awaitPersisted(j1, 20);
             j1.close();
 
             // Reopen: preload the old entries
@@ -89,7 +89,7 @@ public final class JournalCMETest {
 
             // New writes in this run DO increment
             for (int i = 0; i < 5; i++) j2.logSuccess("new-" + i, "TYPE_A", "sha", "dest");
-            drain(j2);
+            awaitPersisted(j2, 5);
             check("new-run-increments-5", j2.getPersistedWritesThisRun() == 5);
 
             j2.close();
@@ -105,7 +105,7 @@ public final class JournalCMETest {
 
             // 5 successful writes
             for (int i = 0; i < 5; i++) j.logSuccess("ok-" + i, "TYPE", "sha", "dest");
-            drain(j);
+            awaitPersisted(j, 5);
             long beforeFailure = j.getPersistedWritesThisRun();
             check("before-failure-5", beforeFailure == 5);
 
@@ -136,7 +136,7 @@ public final class JournalCMETest {
 
             // Pre-populate with 100 entries
             for (int i = 0; i < 100; i++) j.logSuccess("conv-" + i, "TYPE_C", "sha", "dest");
-            drain(j);
+            awaitPersisted(j, 100);
 
             java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(10);
             java.util.concurrent.atomic.AtomicInteger errors = new java.util.concurrent.atomic.AtomicInteger(0);
@@ -165,7 +165,7 @@ public final class JournalCMETest {
             }
             writer.start();
             writer.join();
-            drain(j);
+            awaitPersisted(j, 600);
             latch.await();
 
             check("cme-zero-errors", errors.get() == 0);
@@ -184,7 +184,7 @@ public final class JournalCMETest {
             MigrationJournal j = new MigrationJournal(tmp.toString());
             j.init();
             for (int i = 0; i < 42; i++) j.logSuccess("close-" + i, "TYPE", "sha", "dest");
-            drain(j);
+            awaitPersisted(j, 42);
             long beforeClose = j.getPersistedWritesThisRun();
             check("before-close-42", beforeClose == 42);
             j.close();
@@ -196,14 +196,9 @@ public final class JournalCMETest {
 
     // ── helpers (same as MigrationJournalFailClosedTest) ──
 
-    private static void drain(MigrationJournal journal) throws InterruptedException {
+    private static void awaitPersisted(MigrationJournal journal, long expected) throws InterruptedException {
         for (int i = 0; i < 200; i++) {
-            try {
-                java.lang.reflect.Field f = MigrationJournal.class.getDeclaredField("journalQueue");
-                f.setAccessible(true);
-                java.util.concurrent.BlockingQueue<?> q = (java.util.concurrent.BlockingQueue<?>) f.get(journal);
-                if (q.isEmpty()) break;
-            } catch (Exception e) { break; }
+            if (journal.getPersistedWritesThisRun() >= expected) return;
             Thread.sleep(50);
         }
     }

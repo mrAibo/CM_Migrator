@@ -25,6 +25,35 @@ public final class WorkerFailureStateTest {
         assertFalse(state.hasFailure(), "clear must reset state");
         state.throwIfPresent("must not throw");
 
+        RuntimeException workerCrash = new RuntimeException("consumer crashed");
+        boolean[] shutdownRequested = {false};
+        Runnable guarded = state.guard(
+                () -> { throw workerCrash; },
+                () -> shutdownRequested[0] = true);
+        try {
+            guarded.run();
+            throw new AssertionError("guard must rethrow worker failure");
+        } catch (RuntimeException e) {
+            assertSame(workerCrash, e, "guard must rethrow the original failure");
+        }
+        assertSame(workerCrash, state.get(), "guard must record worker failure");
+        assertTrue(shutdownRequested[0], "guard must invoke shutdown callback");
+
+        state.clear();
+        shutdownRequested[0] = false;
+        AssertionError discoveryCrash = new AssertionError("IBM discovery linkage failed");
+        guarded = state.guard(
+                () -> { throw discoveryCrash; },
+                () -> shutdownRequested[0] = true);
+        try {
+            guarded.run();
+            throw new AssertionError("guard must rethrow discovery Error");
+        } catch (AssertionError e) {
+            assertSame(discoveryCrash, e, "guard must rethrow the original Error");
+        }
+        assertSame(discoveryCrash, state.get(), "guard must record discovery Error");
+        assertTrue(shutdownRequested[0], "Error must invoke shutdown callback");
+
         System.out.println("WorkerFailureStateTest: PASS");
     }
 
