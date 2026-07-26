@@ -19,7 +19,7 @@ awk '
     /switch \(sourceStatus\)/ { in_switch = 1; found_switch = 1 }
     in_switch && /case ERROR:/ { found_error_case = 1 }
     in_switch && /default:/ { found_default = 1 }
-    in_switch && /totalErrors\.incrementAndGet\(\)/ && found_error_case { found_error_count = 1 }
+    in_switch && /counters\.errors\.incrementAndGet\(\)/ && found_error_case { found_error_count = 1 }
     in_switch && /return false;/ && found_error_case { found_error_return = 1 }
     in_switch && /case NOT_FOUND:/ { current_case = "NOT_FOUND" }
     in_switch && /case ERROR:/ { current_case = "ERROR" }

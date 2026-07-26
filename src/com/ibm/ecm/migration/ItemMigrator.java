@@ -181,12 +181,6 @@ public class ItemMigrator {
             long t1 = System.currentTimeMillis();
             DKDatastoreICM sourceDs = sourceConn.getDatastore();
 
-            String actualSourceSSID = sourceConn.getSSID();
-            String actualDestSSID = destConn.getSSID();
-            if (actualSourceSSID.equals(actualDestSSID)) {
-                logger.error("POOL CONTAMINATION DETECTED! Source and Dest have same SSID: {}", actualSourceSSID);
-            }
-            
             ThreadContext.put("sourcePid", pidString);
 
             sourceItem = sourceDs.createDDOFromPID(pidString);

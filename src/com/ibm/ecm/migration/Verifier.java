@@ -62,14 +62,15 @@ public class Verifier {
         return "nonok".equals(VERIFY_WORKLIST_MODE) || "non-ok".equals(VERIFY_WORKLIST_MODE);
     }
 
-    // Counter
-    private static final AtomicInteger totalVerified = new AtomicInteger(0);
-    private static final AtomicInteger totalErrors = new AtomicInteger(0);
-    private static final AtomicInteger totalProcessed = new AtomicInteger(0);
-    private static final AtomicInteger hashSampleCounter = new AtomicInteger(0);
-    private static final AtomicInteger totalSkipped = new AtomicInteger(0);
-    private static final AtomicInteger totalCascadeDeleted = new AtomicInteger(0);  // v1.25: Neue Option: Cascade Delete
-    private static final AtomicInteger totalSourceDeleted = new AtomicInteger(0);   // v1.25: Source not found
+    static final class RunCounters {
+        final AtomicInteger verified = new AtomicInteger();
+        final AtomicInteger errors = new AtomicInteger();
+        final AtomicInteger processed = new AtomicInteger();
+        final AtomicInteger hashSamples = new AtomicInteger();
+        final AtomicInteger skipped = new AtomicInteger();
+        final AtomicInteger cascadeDeleted = new AtomicInteger();
+        final AtomicInteger sourceDeleted = new AtomicInteger();
+    }
 
     private static final ThreadLocal<java.security.MessageDigest> SHA256_DIGEST = 
         ThreadLocal.withInitial(() -> {
@@ -142,10 +143,17 @@ public class Verifier {
         Thread monitorThread = null;
         int shutdownGraceSeconds = 60;
         boolean terminationConfirmed = true;
+        RunCounters counters = new RunCounters();
 
         try {
             MigrationConfig config = new MigrationConfig(configPath);
             OperationalPolicy.enforceCascadeDeleteDisabled(config);
+            OperationalPolicy.validateRunConfiguration(config);
+            boolean internal = config.getSourceSSID().equals(config.getDestSSID());
+            consoleLogger.info("Migration topology: {}", internal ? "INTERNAL_SAME_CM" : "CROSS_CM");
+            if (!internal) {
+                consoleLogger.warn("Cross-CM verification does not validate rewritten SAP or other external references.");
+            }
             shutdownGraceSeconds = config.getShutdownGraceSeconds();
             int threadCount = config.getThreadCount();
             // Journal base directory (muss absolut sein für H2 2.x)
@@ -195,12 +203,12 @@ public class Verifier {
             consoleLogger.info("Initialized Thread Pool with " + threadCount + " threads (queueCapacity=" + queueCapacity + ").");
 
             MigrationStats stats = new MigrationStats() {
-                @Override public long getProcessedItems() { return totalProcessed.get(); }
-                @Override public long getSuccessItems() { return totalVerified.get(); }
-                @Override public long getFailedItems() { return totalErrors.get(); }
-                @Override public long getSkippedItems() { return totalSkipped.get(); }
-                @Override public long getDeletedItems() { return totalCascadeDeleted.get(); } // v1.25
-                @Override public long getTotalItems() { return super.getTotalItems(); } // Will be set later
+                @Override public long getProcessedItems() { return counters.processed.get(); }
+                @Override public long getSuccessItems() { return counters.verified.get(); }
+                @Override public long getFailedItems() { return counters.errors.get(); }
+                @Override public long getSkippedItems() { return counters.skipped.get(); }
+                @Override public long getDeletedItems() { return counters.cascadeDeleted.get(); }
+                @Override public long getTotalItems() { return super.getTotalItems(); }
             };
             
             WebServer.attachCurrentStats(stats);
@@ -312,7 +320,7 @@ public class Verifier {
                                 }
 
                                 if (destItemId == null || destItemId.isEmpty()) {
-                                    totalSkipped.incrementAndGet();
+                                    counters.skipped.incrementAndGet();
                                     continue;
                                 }
 
@@ -335,7 +343,9 @@ public class Verifier {
                                 // Backpressure happens inside executor when queue is full
                                 executor.submit(() -> {
                                     // Custom wrapper to update per-type stats
-                                    boolean success = verifyTask(finalPool, finalLogger, sourceItemId, destItemId, finalJdbcUrl, finalSourceType, sourceChecksum, cascadeDelete, autoRemigrate);
+                                    boolean success = verifyTask(finalPool, finalLogger, sourceItemId, destItemId,
+                                            finalJdbcUrl, finalSourceType, sourceChecksum, cascadeDelete,
+                                            autoRemigrate, counters);
 
                                     // Update per-type results [ok, errors, skipped, total, deleted]
                                     java.util.concurrent.atomic.AtomicIntegerArray res = typeResultsAtomic.get(finalSourceType);
@@ -421,6 +431,8 @@ public class Verifier {
             } catch (Exception e) {
                 logger.warn("Round 9A non-OK CSV export failed: {}", e.getMessage());
             }
+
+            requireCleanVerification(counters);
             
             // --- v1.25: AUDIT PROTOCOL --- (stripped — unified pipeline handles reports)
             // -------------------------------
@@ -484,6 +496,22 @@ public class Verifier {
             } else {
                 logger.warn("Verifier workers may still be active; leaving CM pool and verification logger open.");
             }
+        }
+    }
+
+    static void requireCleanVerification(RunCounters counters)
+            throws RunTerminationException {
+        if (counters.errors.get() > 0
+                || counters.sourceDeleted.get() > 0
+                || counters.skipped.get() > 0) {
+            throw new RunTerminationException(
+                    RunTerminationException.Reason.FAILED,
+                    "Verification completed with non-OK results: errors="
+                            + counters.errors.get()
+                            + ", sourceMissing=" + counters.sourceDeleted.get()
+                            + ", skipped=" + counters.skipped.get(),
+                    true,
+                    null);
         }
     }
 
@@ -658,11 +686,12 @@ public class Verifier {
                                    String itemType,
                                    String storedChecksum,
                                    boolean cascadeDeleteEnabled,
-                                   boolean autoMarkForRemigration) {
+                                   boolean autoMarkForRemigration,
+                                   RunCounters counters) {
         CMConnection sourceConn = null;
         CMConnection destConn = null;
 
-        int p = totalProcessed.get();
+        int p = counters.processed.get();
         if ((p % 1000) == 0) {
             logger.info("MODE destOnly={} storedChecksumLen={} cascadeDelete={}",
                 (storedChecksum != null && !storedChecksum.isEmpty()),
@@ -674,12 +703,13 @@ public class Verifier {
             if (storedChecksum != null && !storedChecksum.isEmpty()) {
                 // Dest-only: no source connection, and size-check is skipped in verifyItem when checksum is present.
                 destConn = pool.borrowDest();
-                VerificationResult result = verifyItem(null, sourcePid, destConn.getDatastore(), destPid, storedChecksum);
+                VerificationResult result = verifyItem(null, sourcePid, destConn.getDatastore(),
+                        destPid, storedChecksum, counters);
 
                 if (result.match) {
                     logger.debug("OK: " + sourcePid + " (" + result.sourceHash + ") -> " + destPid + " (" + result.destHash + ")");
                     logVerificationResult(verificationLogger, jdbcUrl, sourcePid, "OK", result.sourceHash, result.destHash, "Verified Match");
-                    totalVerified.incrementAndGet();
+                    counters.verified.incrementAndGet();
                     return true;
                 } else {
                     String msg = "MISMATCH: " + sourcePid + " (" + result.sourceHash + ") -> " + destPid + " (" + result.destHash + ")";
@@ -691,7 +721,7 @@ public class Verifier {
                         markForRemigration(jdbcUrl, sourcePid, "Checksum mismatch during verification");
                     }
                     
-                    totalErrors.incrementAndGet();
+                    counters.errors.incrementAndGet();
                     return false;
                 }
             } else {
@@ -707,7 +737,7 @@ public class Verifier {
                         break;
 
                     case NOT_FOUND:
-                        totalSourceDeleted.incrementAndGet();
+                        counters.sourceDeleted.incrementAndGet();
                         logger.warn("SOURCE_DELETED: {} no longer exists in source system", sourcePid);
 
                         if (shouldCascadeDelete(sourceStatus, cascadeDeleteEnabled)) {
@@ -716,11 +746,11 @@ public class Verifier {
                             if (deleteSuccess) {
                                 logVerificationResult(verificationLogger, jdbcUrl, sourcePid, "CASCADE_DELETED", null, null,
                                     "Source deleted, destination item " + destPid + " also deleted");
-                                totalCascadeDeleted.incrementAndGet();
+                                counters.cascadeDeleted.incrementAndGet();
                             } else {
                                 logVerificationResult(verificationLogger, jdbcUrl, sourcePid, "CASCADE_DELETE_FAILED", null, null,
                                     "Source deleted, but failed to delete destination item " + destPid);
-                                totalErrors.incrementAndGet();
+                                counters.errors.incrementAndGet();
                             }
                         } else {
                             // Just mark as orphaned (source deleted, dest still exists)
@@ -735,17 +765,18 @@ public class Verifier {
                                 + "; cascade delete refused (status=" + sourceStatus + ")";
                         logger.error(lookupMessage);
                         logVerificationResult(verificationLogger, jdbcUrl, sourcePid, "ERROR", null, null, lookupMessage);
-                        totalErrors.incrementAndGet();
+                        counters.errors.incrementAndGet();
                         return false;
                 }
 
                 // Source exists - proceed with normal hash verification
-                VerificationResult result = verifyItem(sourceConn.getDatastore(), sourcePid, destConn.getDatastore(), destPid, null);
+                VerificationResult result = verifyItem(sourceConn.getDatastore(), sourcePid,
+                        destConn.getDatastore(), destPid, null, counters);
 
                 if (result.match) {
                     logger.debug("OK: " + sourcePid + " (" + result.sourceHash + ") -> " + destPid + " (" + result.destHash + ")");
                     logVerificationResult(verificationLogger, jdbcUrl, sourcePid, "OK", result.sourceHash, result.destHash, "Verified Match");
-                    totalVerified.incrementAndGet();
+                    counters.verified.incrementAndGet();
                     return true;
                 } else {
                     String msg = "MISMATCH: " + sourcePid + " (" + result.sourceHash + ") -> " + destPid + " (" + result.destHash + ")";
@@ -757,7 +788,7 @@ public class Verifier {
                         markForRemigration(jdbcUrl, sourcePid, "Checksum mismatch during verification (full-check)");
                     }
                     
-                    totalErrors.incrementAndGet();
+                    counters.errors.incrementAndGet();
                     return false;
                 }
             }
@@ -765,10 +796,10 @@ public class Verifier {
         } catch (Exception e) {
             logger.error("Error verifying " + sourcePid, e);
             logVerificationResult(verificationLogger, jdbcUrl, sourcePid, "ERROR", null, null, e.getMessage());
-            totalErrors.incrementAndGet();
+            counters.errors.incrementAndGet();
             return false;
         } finally {
-            totalProcessed.incrementAndGet();
+            counters.processed.incrementAndGet();
             if (pool != null) {
                 if (sourceConn != null) pool.returnSource(sourceConn);
                 if (destConn != null) pool.returnDest(destConn);
@@ -792,7 +823,8 @@ public class Verifier {
                                                  String sourcePid,
                                                  DKDatastoreICM destDs,
                                                  String destPid,
-                                                 String storedChecksum) {
+                                                 String storedChecksum,
+                                                 RunCounters counters) {
         try {
             String sourceHash;
 
@@ -816,13 +848,13 @@ public class Verifier {
                 sourceHash = storedChecksum;
             } else {
                 if (sourceDs == null) return new VerificationResult(false, "no-conn", "unknown");
-                sourceHash = getHash(sourceDs, sourcePid, "source");
+                sourceHash = getHash(sourceDs, sourcePid, "source", counters);
             }
 
             if (sourceHash == null) return new VerificationResult(false, "null", "unknown");
 
             // 2. Lese Dest Hash
-            String destHash = getHash(destDs, destPid, "dest");
+            String destHash = getHash(destDs, destPid, "dest", counters);
             if (destHash == null) return new VerificationResult(false, sourceHash, "null");
 
             // 3. Vergleiche
@@ -835,7 +867,8 @@ public class Verifier {
     }
 
     @SuppressWarnings("deprecation")
-    private static String getHash(DKDatastoreICM ds, String pid, String label) throws Exception {
+    private static String getHash(DKDatastoreICM ds, String pid, String label,
+                                  RunCounters counters) throws Exception {
         java.security.MessageDigest digest = SHA256_DIGEST.get();
         digest.reset();
         boolean hasParts = false;
@@ -967,7 +1000,7 @@ public class Verifier {
             if (!hasParts) return null;
     
             // --- TIMING PATCH: sample log every 500 processed items ---
-            int sampleNo = hashSampleCounter.incrementAndGet();
+            int sampleNo = counters.hashSamples.incrementAndGet();
             if ((sampleNo % 500) == 0) {
                 logger.info("PERF getHash sample={} label={} retrieveMs={} streamMs={} bytes={} parts={}",
                         sampleNo, label, retrieveMs, streamMsTotal, totalBytesRead, sortedParts.size());

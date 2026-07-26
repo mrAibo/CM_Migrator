@@ -44,6 +44,15 @@ public class Main {
 
         MigrationConfig config = new MigrationConfig(configPath);
         OperationalPolicy.enforceCascadeDeleteDisabled(config);
+        OperationalPolicy.validateRunConfiguration(config);
+
+        if (!"DELETE".equalsIgnoreCase(config.getOperationMode())) {
+            boolean internal = config.getSourceSSID().equals(config.getDestSSID());
+            logger.info("Migration topology: {}", internal ? "INTERNAL_SAME_CM" : "CROSS_CM");
+            if (!internal) {
+                logger.warn("Cross-CM migration does not rewrite SAP or other external references.");
+            }
+        }
 
         SdkCapabilityProbe.logCapabilities();
         SdkCapabilityProbe.enforceFailFast();

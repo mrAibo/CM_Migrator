@@ -92,10 +92,10 @@ public final class UnifiedReportingTest {
             r2.status() == OverallStatus.FAILED,
             "got " + r2.status());
 
-        // MigrationWithSkips: failed=0, skipped>0 -> WARNING (current behavior)
+        // Skips are operational accounting and do not downgrade the report.
         UnifiedReport r3 = buildReport(OperationType.MIGRATION, 100, 90, 0, 10, 0, 0, -1);
-        check("MigrationWithSkips -> WARNING (current: skipped downgrades)",
-            r3.status() == OverallStatus.WARNING,
+        check("MigrationWithSkips -> SUCCESS",
+            r3.status() == OverallStatus.SUCCESS,
             "got " + r3.status());
 
         // VerificationMismatch: mismatches>0 -> FAILED
@@ -104,12 +104,10 @@ public final class UnifiedReportingTest {
             r4.status() == OverallStatus.FAILED,
             "got " + r4.status());
 
-        // VerificationOrphaned: orphaned>0, failed=0, mismatches=0 -> FAILED (current: failed>0 from mismatch field)
-        // ponytail: orphaned is mapped to failed in status computation, so it shows FAILED
+        // Orphaned items are visible as WARNING unless a mismatch/error also exists.
         UnifiedReport r5 = buildReport(OperationType.VERIFICATION, 50, 48, 0, 0, 0, 0, 2);
-        // With orphaned > 0 counted as failed via overall status compute
-        check("VerificationOrphaned -> FAILED (orphaned maps to failed)",
-            r5.status() == OverallStatus.FAILED,
+        check("VerificationOrphaned -> WARNING",
+            r5.status() == OverallStatus.WARNING,
             "got " + r5.status());
 
         // DeleteSuccess: failed=0, deleted>0 -> SUCCESS
@@ -792,12 +790,8 @@ public final class UnifiedReportingTest {
         long mismatches, long orphaned,
         List<ItemTypeResult> itemTypes, List<ReportError> errors) {
 
-        // Compute status based on the current collector logic
-        long effectiveFailed = failed + mismatches + orphaned;
-        OverallStatus status;
-        if (effectiveFailed > 0) status = OverallStatus.FAILED;
-        else if (skipped > 0) status = OverallStatus.WARNING;
-        else status = OverallStatus.SUCCESS;
+        OverallStatus status = ReportDataCollector.computeStatus(
+            failed, Math.max(0, mismatches), Math.max(0, orphaned));
 
         String idPrefix = opType == OperationType.MIGRATION ? "MIG_" :
             opType == OperationType.VERIFICATION ? "VER_" : "DEL_";
@@ -807,7 +801,7 @@ public final class UnifiedReportingTest {
             opId, opType, status,
             System.currentTimeMillis() - 120000, System.currentTimeMillis(),
             "SourceDB", "DestDB",
-            total, success + failed + skipped, success, effectiveFailed, skipped, deleted,
+            total, success + failed + skipped, success, failed, skipped, deleted,
             total > 0 ? (double)(success + failed + skipped) / 120.0 : 0.0,
             (success + failed + skipped) > 0 ? (double)success / (success + failed + skipped) * 100.0 : 100.0,
             itemTypes, errors

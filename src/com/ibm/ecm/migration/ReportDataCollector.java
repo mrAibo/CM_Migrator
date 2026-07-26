@@ -224,14 +224,18 @@ public class ReportDataCollector {
 
     /** Computes overall status using both live stats and verification data. */
     private static OverallStatus computeStatus(MigrationStats stats, List<ItemTypeResult> itemTypes) {
-        if (stats.getFailedItems() > 0) return OverallStatus.FAILED;
+        long mismatches = 0;
+        long orphaned = 0;
         for (ItemTypeResult it : itemTypes) {
-            if (it.mismatches() > 0) return OverallStatus.FAILED;
+            mismatches += Math.max(0, it.mismatches());
+            orphaned += Math.max(0, it.orphaned());
         }
-        // ponytail: orphaned items are WARNING only when nothing else failed
-        for (ItemTypeResult it : itemTypes) {
-            if (it.orphaned() > 0) return OverallStatus.WARNING;
-        }
+        return computeStatus(stats.getFailedItems(), mismatches, orphaned);
+    }
+
+    static OverallStatus computeStatus(long failed, long mismatches, long orphaned) {
+        if (failed > 0 || mismatches > 0) return OverallStatus.FAILED;
+        if (orphaned > 0) return OverallStatus.WARNING;
         return OverallStatus.SUCCESS;
     }
 
