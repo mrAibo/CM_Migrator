@@ -163,8 +163,8 @@ public final class SinglePassTransitionTest {
             phase2.contains("streaming"),
             "phase2");
         check("phase2: processed count visible",
-            phase2.contains("4,200"),
-            "phase2 should show processed=4,200");
+            phase2.contains("4.200"),
+            "phase2 should show processed=4.200");
 
         // Phase 3: discovery nearly done
         s.discovered = 9800;

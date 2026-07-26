@@ -214,10 +214,9 @@ public final class UnifiedReportingTest {
             html.contains(r.operationId()),
             "ID not found in HTML");
         String email = ReportRenderer.renderEmailBody(r);
-        // email body doesn't show operationId directly - it shows operation type
-        check("Email body contains MIGRATION",
-            email.contains("MIGRATION"),
-            "operation type not in email");
+        check("Email body contains operation ID",
+            email.contains(r.operationId()),
+            "operation ID not in email");
 
         // Format patterns
         check("MIG prefix recognized", r.operationId().startsWith("MIG_"),
@@ -246,6 +245,7 @@ public final class UnifiedReportingTest {
         String html = ReportRenderer.renderFullReport(r);
         String email = ReportRenderer.renderEmailBody(r);
         String subject = ReportRenderer.emailSubject(r);
+        String protocol = AuditProtocolGenerator.render(r);
 
         // --- HTML contains correct totals ---
         check("HTML shows total 100",
@@ -266,19 +266,50 @@ public final class UnifiedReportingTest {
             email.contains("3"),
             "failed not in email");
 
+        // --- Decision-first operator content ---
+        check("HTML leads with review decision",
+            html.contains("Migration mit Abweichungen abgeschlossen")
+                && html.indexOf("Prüfpflichtige Objekte") < html.indexOf("Ergebnis nach ItemType"),
+            "decision or ordering missing");
+        check("Email contains decision and next action",
+            email.contains("Prüfung erforderlich") && email.contains("Nächster Schritt"),
+            "decision content missing");
+        check("Email contains affected object",
+            email.contains("12345"),
+            "affected item missing");
+
         // --- Subject line contains operation type and status ---
         check("Subject contains CM Migrator",
             subject.contains("CM Migrator"),
             "got: " + subject);
-        check("Subject contains FAILED",
-            subject.contains("FAILED"),
+        check("Subject contains review decision",
+            subject.contains("PRÜFUNG"),
             "got: " + subject);
         check("Subject contains MIGRATION",
             subject.contains("MIGRATION"),
             "got: " + subject);
-        check("Subject contains errors count",
-            subject.contains("3 errors"),
+        check("Subject contains deviations count",
+            subject.contains("3 Abweichungen"),
             "got: " + subject);
+        check("Subject combines decision and count",
+            subject.contains("PRÜFUNG") && subject.contains("3 Abweichungen"),
+            "got: " + subject);
+
+        // --- Unified audit protocol ---
+        check("Protocol contains explicit verdict",
+            protocol.contains("Bedingt freigegeben"),
+            "verdict missing");
+        check("Protocol contains evidence chain",
+            protocol.contains("Kontrolle") && protocol.contains("Nachweis")
+                && protocol.contains("Ergebnis") && protocol.contains("Offene Maßnahmen"),
+            "evidence chain missing");
+        check("Protocol contains operation identity",
+            protocol.contains(r.operationId()) && protocol.contains("2.2.1"),
+            "operation ID or version missing");
+        check("Protocol is offline-safe",
+            !protocol.contains("fonts.googleapis.com")
+                && !protocol.contains("http://") && !protocol.contains("https://"),
+            "external resource found");
 
         // --- No file:// in any output ---
         check("HTML has no file://",
@@ -409,6 +440,10 @@ public final class UnifiedReportingTest {
         check("report.html file exists",
             new File(result.reportPath()).exists(),
             "file not found: " + result.reportPath());
+        File protocolFile = new File(new File(result.reportPath()).getParentFile(), "pruefprotokoll.html");
+        check("pruefprotokoll.html file exists",
+            protocolFile.exists(),
+            "file not found: " + protocolFile);
 
         // --- errors.csv only when errors present ---
         // Current report has no errors, so no CSV
@@ -560,6 +595,9 @@ public final class UnifiedReportingTest {
                     String muttLogContent = new String(Files.readAllBytes(muttLog.toPath()));
                     check("mutt receives -a argument",
                         muttLogContent.contains("-a"),
+                        "mutt args: " + muttLogContent.trim());
+                    check("mutt receives audit protocol attachment",
+                        muttLogContent.contains("pruefprotokoll.html"),
                         "mutt args: " + muttLogContent.trim());
                 } else {
                     fail("mutt receives -a argument",

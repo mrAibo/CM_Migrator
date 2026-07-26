@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CM Migrator v2.2 - WebGUI</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
     <style>
         :root {
             --bg: #f6f7fb; --panel: #ffffff; --border: #e2e8f0;
@@ -12,7 +11,7 @@
             --error: #dc2626; --text: #1e293b; --muted: #64748b;
         }
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+        body { font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
         .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
         .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; padding: 20px; background: var(--primary); border-radius: 16px; color: #fff; }
         .logo { display: flex; align-items: center; gap: 12px; }
@@ -26,8 +25,18 @@
         .btn-secondary { background: #475569; color: #fff; }
         .btn-danger { background: var(--error); color: #fff; }
         .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .operator-strip { display:grid;grid-template-columns:220px 1fr 260px;gap:14px;margin-bottom:20px; }
+        .operator-block { background:#fff;border:1px solid var(--border);border-radius:14px;padding:15px 17px;box-shadow:0 4px 12px rgba(0,0,0,.04); }
+        .operator-block h2 { font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px; }
+        .operator-block .actions { flex-wrap:wrap; }
+        .operator-block.danger { background:#fff8f8;border-color:#fecaca; }
+        .operator-block.danger h2 { color:#b91c1c; }
+        .status-time { display:flex;justify-content:space-between;align-items:center;gap:10px; }
+        .bar-title { font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;white-space:nowrap; }
+        .section-label { font-size:.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;border-bottom:1px solid var(--border);padding-bottom:5px;margin:18px 0 12px; }
         .grid { display: grid; grid-template-columns: 350px 1fr 320px; gap: 20px; }
-        @media (max-width: 1200px) { .grid { grid-template-columns: 1fr; } }
+        @media (max-width: 1200px) { .grid { grid-template-columns: 1fr; }.operator-strip{grid-template-columns:1fr 1fr}.operator-block.danger{grid-column:1/-1} }
+        @media (max-width: 720px) { .operator-strip{grid-template-columns:1fr}.operator-block.danger{grid-column:auto}.profile-bar{align-items:stretch;flex-direction:column}.profile-bar select{min-width:0}.header{align-items:flex-start} }
         .card { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
         .card h3 { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 16px; }
         .form-group { margin-bottom: 16px; }
@@ -88,16 +97,33 @@
                     <div class="subtitle" id="systemInfo">WebGUI • Ready</div>
                 </div>
             </div>
-            <div class="actions">
-                <button class="btn btn-primary" id="btnStart" onclick="startMigration()">▶ Migrate</button>
-                <button class="btn btn-safe" id="btnSafe" onclick="startSafeWorkflow()">🛡️ Safe</button>
-                <button class="btn btn-danger" id="btnDelete" onclick="startDelete()">🗑️ Delete</button>
-                <button class="btn btn-secondary" id="btnVerify" onclick="startVerification()">✓ Verify</button>
-                <button class="btn btn-danger" id="btnStop" onclick="stopMigration()" disabled>⏹ Stop</button>
-                <button class="btn btn-secondary" onclick="runBenchmark()">🔬 Bench</button>
-            </div>
+            <div class="subtitle">Operator-Konsole · localhost-first</div>
         </header>
+        <section class="operator-strip" aria-label="Betriebssteuerung">
+            <div class="operator-block">
+                <h2>Betriebsstatus</h2>
+                <div class="status-time">
+                    <span class="status-badge idle" id="statusBadge">● IDLE</span>
+                    <span style="font-family:monospace;color:var(--muted);font-size:13px" id="timestamp">--:--:--</span>
+                </div>
+            </div>
+            <div class="operator-block">
+                <h2>Nächster sicherer Schritt</h2>
+                <div class="actions">
+                    <button type="button" class="btn btn-safe" id="btnSafe" onclick="startSafeWorkflow()">Sicherer Ablauf</button>
+                    <button type="button" class="btn btn-primary" id="btnStart" onclick="startMigration()">Migration</button>
+                    <button type="button" class="btn btn-secondary" id="btnVerify" onclick="startVerification()">Verifikation</button>
+                    <button type="button" class="btn btn-secondary" id="btnStop" onclick="stopMigration()" disabled>Stopp</button>
+                    <button type="button" class="btn btn-secondary" onclick="runBenchmark()">Benchmark</button>
+                </div>
+            </div>
+            <div class="operator-block danger">
+                <h2>Destruktive Aktion</h2>
+                <button type="button" class="btn btn-danger" id="btnDelete" onclick="startDelete()">Quelldaten löschen</button>
+            </div>
+        </section>
         <div class="profile-bar">
+            <strong class="bar-title">Konfiguration &amp; Profile</strong>
             <label for="profileSelect">Config profile</label>
             <select id="profileSelect" onchange="profileChanged()">
                 <option value="conf/migration.properties">migration</option>
@@ -110,7 +136,8 @@
         <div class="grid">
             <!-- Left: Configuration -->
             <div class="card">
-                <h3>Configuration</h3>
+                <h3>Ausführungsparameter</h3>
+                <div class="section-label">Verbindung</div>
                 <div class="form-group">
                     <label for="sourceSSID">SOURCE_SSID</label>
                     <input type="text" id="sourceSSID" placeholder="z.B. ICMNLSDB">
@@ -135,6 +162,7 @@
                     <label for="destPassword">DEST_PASSWORD</label>
                     <input type="password" id="destPassword" placeholder="•••••••• (leer = gleich wie Source)">
                 </div>
+                <div class="section-label">Umfang &amp; Betriebsmodus</div>
                 <div class="form-group">
                     <label for="itemTypes">MIGRATE_ITEMTYPES</label>
                     <input type="text" id="itemTypes" placeholder="Rechnung:Rechnung_V2">
@@ -213,11 +241,7 @@
             </div>
             <!-- Center: Live Status -->
             <div class="card">
-                <h3>Live Status</h3>
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
-                    <span class="status-badge idle" id="statusBadge">● IDLE</span>
-                    <span style="font-family:'JetBrains Mono';color:var(--muted);font-size:13px;" id="timestamp">--:--:--</span>
-                </div>
+                <h3>Betriebsstatus</h3>
                 <div class="process-panel" id="processPanel">
                     <div style="font-size:12px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.08em">Process page</div>
                     <div style="margin-top:6px"><a href="#" target="_blank" id="processLink">Open process</a></div>
@@ -313,123 +337,20 @@
             t.className = 'toast show ' + type;
             setTimeout(() => t.className = 'toast', 3000);
         }
+
+        async function requestJson(url, options) {
+            const resp = await fetch(url, Object.assign({cache: 'no-store'}, options || {}));
+            const text = await resp.text();
+            let data = {};
+            try { data = text ? JSON.parse(text) : {}; }
+            catch (e) { throw new Error('Invalid server response'); }
+            if (!resp.ok) throw new Error(data.error || ('HTTP ' + resp.status));
+            return data;
+        }
         
         function toggleOverride() {
             const fields = document.getElementById('overrideFields');
             fields.classList.toggle('hidden', !document.getElementById('overrideCheck').checked);
-        }
-        
-        async function loadConfig() {
-            try {
-                const resp = await fetch('/api/config');
-                const cfg = await resp.json();
-                document.getElementById('sourceSSID').value = cfg.SOURCE_SSID || '';
-                document.getElementById('destSSID').value = cfg.DEST_SSID || '';
-                document.getElementById('sourceUser').value = cfg.SOURCE_USER || cfg.CONNECT_USER || '';
-                document.getElementById('destUser').value = cfg.DEST_USER || '';
-                document.getElementById('itemTypes').value = cfg.MIGRATE_ITEMTYPES || '';
-                document.getElementById('filterPredicate').value = cfg.FILTER_PREDICATE || '';
-                document.getElementById('profile').value = cfg.PROFILE || 'MITTEL';
-                if (cfg.THREAD_COUNT) { document.getElementById('threadCount').value = cfg.THREAD_COUNT; document.getElementById('overrideCheck').checked = true; toggleOverride(); }
-                if (cfg.BATCH_SIZE) document.getElementById('batchSize').value = cfg.BATCH_SIZE;
-                if (cfg.QUEUE_SIZE) document.getElementById('queueSize').value = cfg.QUEUE_SIZE;
-                toast('Configuration loaded', 'success');
-            } catch (e) { toast('Failed to load config', 'error'); }
-        }
-        
-        async function saveConfig() {
-            const sourceUser = document.getElementById('sourceUser').value;
-            const sourcePass = document.getElementById('sourcePassword').value;
-            const destUser = document.getElementById('destUser').value;
-            const destPass = document.getElementById('destPassword').value;
-            
-            const filterPred = document.getElementById('filterPredicate').value;
-            
-            const cfg = {
-                SOURCE_SSID: document.getElementById('sourceSSID').value,
-                DEST_SSID: document.getElementById('destSSID').value,
-                SOURCE_USER: sourceUser,
-                MIGRATE_ITEMTYPES: document.getElementById('itemTypes').value,
-                PROFILE: document.getElementById('profile').value
-            };
-            
-            // Optional: Filter Predicate nur wenn gesetzt
-            if (filterPred) cfg.FILTER_PREDICATE = filterPred;
-            
-            // Wenn Source-Passwort gesetzt, speichern
-            if (sourcePass) cfg.SOURCE_PASSWORD = sourcePass;
-            
-            // Wenn Dest-User explizit gesetzt, verwende separate Credentials
-            if (destUser) {
-                cfg.DEST_USER = destUser;
-                if (destPass) cfg.DEST_PASSWORD = destPass;
-            } else {
-                // Fallback: CONNECT_USER für beide (alte Kompatibilität)
-                cfg.CONNECT_USER = sourceUser;
-            }
-            
-            if (document.getElementById('overrideCheck').checked) {
-                if (document.getElementById('threadCount').value) cfg.THREAD_COUNT = document.getElementById('threadCount').value;
-                if (document.getElementById('batchSize').value) cfg.BATCH_SIZE = document.getElementById('batchSize').value;
-                if (document.getElementById('queueSize').value) cfg.QUEUE_SIZE = document.getElementById('queueSize').value;
-            }
-            try {
-                const resp = await fetch('/api/config', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(cfg) });
-                const result = await resp.json();
-                toast(result.message || 'Saved!', 'success');
-            } catch (e) { toast('Failed to save', 'error'); }
-        }
-        
-        async function startMigration() {
-            try {
-                const resp = await fetch('/api/migration/start', { method: 'POST' });
-                const result = await resp.json();
-                if (result.success) {
-                    toast('Migration started', 'success');
-                    document.getElementById('btnStart').disabled = true;
-                    document.getElementById('btnStop').disabled = false;
-                    startPolling();
-                } else { toast(result.error || 'Failed', 'error'); }
-            } catch (e) { toast('Failed to start', 'error'); }
-        }
-        
-        async function stopMigration() {
-            try {
-                const resp = await fetch('/api/migration/stop', { method: 'POST' });
-                const result = await resp.json();
-                toast(result.message || 'Stop signal sent');
-            } catch (e) { toast('Failed to stop', 'error'); }
-        }
-        
-        async function startDelete() {
-            if (!confirm('⚠️ WARNUNG: Sie sind dabei, Daten im QUELLSYSTEM zu löschen!\n\nDies kann nicht rückgängig gemacht werden.\n\nFortfahren?')) {
-                return;
-            }
-            try {
-                const resp = await fetch('/api/delete/start', { method: 'POST' });
-                const result = await resp.json();
-                if (result.success) {
-                    toast('Delete-Modus gestartet', 'success');
-                    document.getElementById('btnStart').disabled = true;
-                    document.getElementById('btnDelete').disabled = true;
-                    document.getElementById('btnStop').disabled = false;
-                    startPolling();
-                } else { toast(result.error || 'Failed', 'error'); }
-            } catch (e) { toast('Failed to start delete', 'error'); }
-        }
-        
-        async function startVerification() {
-            try {
-                const resp = await fetch('/api/verify/start', { method: 'POST' });
-                const result = await resp.json();
-                if (result.success) {
-                    toast('Verifikation gestartet', 'success');
-                    document.getElementById('btnStart').disabled = true;
-                    document.getElementById('btnVerify').disabled = true;
-                    document.getElementById('btnStop').disabled = false;
-                    startPolling();
-                } else { toast(result.error || 'Failed', 'error'); }
-            } catch (e) { toast('Failed to start verification', 'error'); }
         }
         
         async function runBenchmark() {
@@ -447,16 +368,15 @@
             try {
                 document.getElementById('benchStatus').textContent = '● Running...';
                 document.getElementById('benchStatus').className = 'status-badge running';
-                const resp = await fetch('/api/benchmark', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(data) });
+                await requestJson('/api/benchmark', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(data) });
                 toast('Benchmark started', 'success');
                 setTimeout(pollBenchmark, 2000);
-            } catch (e) { toast('Benchmark failed', 'error'); }
+            } catch (e) { toast('Benchmark failed: ' + e.message, 'error'); }
         }
         
         async function pollBenchmark() {
             try {
-                const resp = await fetch('/api/benchmark/status');
-                const data = await resp.json();
+                const data = await requestJson('/api/benchmark/status');
                 if (data.running) { setTimeout(pollBenchmark, 1000); return; }
                 document.getElementById('benchStatus').textContent = '● Complete';
                 document.getElementById('benchStatus').className = 'status-badge idle';
@@ -484,44 +404,6 @@
         
         function stopPolling() {
             if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
-        }
-        
-        async function pollStatus() {
-            try {
-                const resp = await fetch('/api/migration/status');
-                const data = await resp.json();
-                const badge = document.getElementById('statusBadge');
-                const now = new Date();
-                document.getElementById('timestamp').textContent = now.toLocaleTimeString();
-                if (data.running) {
-                    badge.textContent = '● RUNNING';
-                    badge.className = 'status-badge running';
-                    document.getElementById('btnStart').disabled = true;
-                    document.getElementById('btnStop').disabled = false;
-                } else {
-                    badge.textContent = '● IDLE';
-                    badge.className = 'status-badge idle';
-                    document.getElementById('btnStart').disabled = false;
-                    document.getElementById('btnStop').disabled = true;
-                    stopPolling();
-                }
-                if (data.stats) {
-                    const s = data.stats;
-                    const pct = parseFloat(s.percent) || 0;
-                    const circumference = 2 * Math.PI * 80;
-                    const offset = circumference - (circumference * pct / 100);
-                    document.getElementById('gaugeFill').style.strokeDashoffset = offset;
-                    document.getElementById('gaugePercent').textContent = pct.toFixed(1) + '%';
-                    document.getElementById('statProcessed').textContent = s.processed.toLocaleString();
-                    document.getElementById('statTotal').textContent = s.total.toLocaleString();
-                    document.getElementById('statSuccess').textContent = s.success.toLocaleString();
-                    document.getElementById('statFailed').textContent = s.failed.toLocaleString();
-                    document.getElementById('statSpeed').textContent = parseFloat(s.speed).toFixed(1);
-                    const elapsed = Math.floor(s.elapsedMs / 1000);
-                    document.getElementById('statElapsed').textContent = formatTime(elapsed);
-                    document.getElementById('statEta').textContent = formatTime(s.etaSeconds);
-                }
-            } catch (e) {}
         }
         
         function formatTime(sec) {
@@ -676,8 +558,7 @@
         async function loadProfiles(preservePath) {
             try {
                 const currentPath = (preservePath || getSelectedConfigFile() || '').trim();
-                const resp = await fetch('/api/profiles');
-                const data = await resp.json();
+                const data = await requestJson('/api/profiles');
                 const sel = document.getElementById('profileSelect');
                 sel.innerHTML = '';
 
@@ -732,12 +613,7 @@
                     return;
                 }
 
-                const resp = await fetch('/api/config?configFile=' + encodeURIComponent(configFile));
-                const cfg = await resp.json();
-                if (cfg.error) {
-                    toast(cfg.error, 'error');
-                    return;
-                }
+                const cfg = await requestJson('/api/config?configFile=' + encodeURIComponent(configFile));
 
                 const loadedFile = cfg.__configFile || configFile;
                 setSelectedConfigFile(loadedFile);
@@ -829,17 +705,11 @@
             const cfg = collectConfigFromForm(configFile);
 
             try {
-                const resp = await fetch('/api/config?configFile=' + encodeURIComponent(configFile), {
+                const result = await requestJson('/api/config?configFile=' + encodeURIComponent(configFile), {
                     method: 'POST',
                     headers: {'Content-Type':'application/json'},
                     body: JSON.stringify(cfg)
                 });
-                const result = await resp.json();
-
-                if (result.error) {
-                    toast(result.error, 'error');
-                    throw new Error(result.error);
-                }
 
                 const savedFile = result.configFile || configFile;
                 setSelectedConfigFile(savedFile);
@@ -897,7 +767,7 @@
             try {
                 const savedConfigFile = await saveConfig(selectedConfigFile);
 
-                const resp = await fetch('/api/operation/start', {
+                const result = await requestJson('/api/operation/start', {
                     method: 'POST',
                     headers: {'Content-Type':'application/json'},
                     body: JSON.stringify({
@@ -905,23 +775,18 @@
                         configFile: savedConfigFile
                     })
                 });
-                const result = await resp.json();
 
-                if (result.success) {
-                    toast('Process started', 'success');
-                    showProcessLink(result);
-                    window.open(result.processUrl, '_blank');
-                    document.getElementById('btnStart').disabled = true;
-                    document.getElementById('btnSafe').disabled = true;
-                    document.getElementById('btnDelete').disabled = true;
-                    document.getElementById('btnVerify').disabled = true;
-                    document.getElementById('btnStop').disabled = false;
-                    startPolling();
-                } else {
-                    toast(result.error || 'Failed', 'error');
-                }
+                toast('Process started', 'success');
+                showProcessLink(result);
+                window.open(result.processUrl, '_blank');
+                document.getElementById('btnStart').disabled = true;
+                document.getElementById('btnSafe').disabled = true;
+                document.getElementById('btnDelete').disabled = true;
+                document.getElementById('btnVerify').disabled = true;
+                document.getElementById('btnStop').disabled = false;
+                startPolling();
             } catch (e) {
-                toast('Failed to start operation', 'error');
+                toast('Start abgelehnt: ' + e.message, 'error');
             }
         }
 
@@ -932,18 +797,16 @@
 
         async function stopMigration() {
             try {
-                const resp = await fetch('/api/process/stop', { method: 'POST' });
-                const result = await resp.json();
+                const result = await requestJson('/api/process/stop', { method: 'POST' });
                 toast(result.message || 'Stop signal sent');
             } catch (e) {
-                toast('Failed to stop', 'error');
+                toast('Stop abgelehnt: ' + e.message, 'error');
             }
         }
 
         async function pollStatus() {
             try {
-                const resp = await fetch('/api/process/current');
-                const data = await resp.json();
+                const data = await requestJson('/api/process/current');
                 const p = data.process;
                 const badge = document.getElementById('statusBadge');
                 document.getElementById('timestamp').textContent = new Date().toLocaleTimeString();
@@ -991,7 +854,11 @@
                     document.getElementById('btnVerify').disabled = false;
                     document.getElementById('btnStop').disabled = true;
                 }
-            } catch (e) {}
+            } catch (e) {
+                const badge = document.getElementById('statusBadge');
+                badge.textContent = '● OFFLINE';
+                badge.className = 'status-badge stopped';
+            }
         }
 
         // Initial load

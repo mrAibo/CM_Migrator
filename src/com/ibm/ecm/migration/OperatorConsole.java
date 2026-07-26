@@ -528,8 +528,8 @@ public final class OperatorConsole {
     private static String r()              { return ConsoleUI.RESET; }
     private static String box(String u, String a) { return ConsoleUI.c(ConsoleUI.BRIGHT_CYAN) + (NO_COLOR ? a : u) + ConsoleUI.RESET; }
     private static String repeat(String s, int n) { return ConsoleUI.repeat(s, n); }
-    private static String fmt(long n)      { return String.format("%,d", n).replace(',', '.'); }
-    private static String fmtPct(double p) { return String.format("%5.1f%%", p); }
+    private static String fmt(long n)      { return String.format(java.util.Locale.ROOT, "%,d", n).replace(',', '.'); }
+    private static String fmtPct(double p) { return String.format(java.util.Locale.ROOT, "%5.1f%%", p); }
     private static String trunc(String s, int len) { return s != null && s.length() > len ? s.substring(0, len) : (s != null ? s : ""); }
     private static String sanitize(String s){ return s != null ? s.replace("\n", " ").replace("\r", "") : ""; }
     private static String timestamp() { return java.time.LocalTime.now().format(java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss")); }

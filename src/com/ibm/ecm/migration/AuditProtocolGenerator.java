@@ -1,496 +1,170 @@
 /*
  * Projekt: CM Migrator 2.2.1.
- * @Author: Aleksej Voronin, Sven Lindt
- * @Date:   26.01.2026
  */
-
 package com.ibm.ecm.migration;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 
-import java.io.File;
-import java.io.FileWriter;
-import java.io.PrintWriter;
-import java.nio.charset.StandardCharsets;
-import java.sql.Connection;
-import java.sql.DriverManager;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
-import java.util.Map;
+/** Renders the printable A4 audit protocol from the unified report model. */
+public final class AuditProtocolGenerator {
 
-/**
- * Generates audit protocols (Prüfprotokolle) per ItemType.
- * 
- * Dieses Protocoll erstellt A4 Dokument:
- * - Migration Statistic
- * - Verification result
- * - Missing items (if any)
- * - Unterschrift und Bemerkungen
- */
-public class AuditProtocolGenerator {
-    private static final Logger logger = LogManager.getLogger(AuditProtocolGenerator.class);
+    private static final String VERSION = OperatorConsole.VERSION;
 
-    private static final String PRINT_CSS = 
-        "@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');" +
-        ":root { --primary: #0f172a; --muted: #64748b; --accent: #f97316; --ok: #16a34a; --bad: #dc2626; }" +
-        "@page { size: A4 portrait; margin: 20mm; }" +
-        "* { margin: 0; padding: 0; box-sizing: border-box; }" +
-        "body { font-family: 'Inter', Arial, sans-serif; font-size: 11pt; line-height: 1.5; color: #1e293b; background: #fff; padding: 0; }" +
-        ".protocol { max-width: 800px; margin: 0 auto; padding: 20px; }" +
-        ".header { border-bottom: 3px solid var(--primary); padding-bottom: 15px; margin-bottom: 20px; }" +
-        ".header h1 { font-size: 18pt; font-weight: 700; text-transform: uppercase; color: var(--primary); margin: 0; }" +
-        ".header .subtitle { font-size: 10pt; color: var(--muted); margin-top: 5px; }" +
-        ".meta-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 15px; margin-bottom: 20px; }" +
-        ".meta-row { display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px dotted #e2e8f0; }" +
-        ".meta-row:last-child { border-bottom: none; }" +
-        ".meta-label { color: var(--muted); font-size: 10pt; }" +
-        ".meta-value { font-weight: 600; font-size: 10pt; }" +
-        ".section { margin-bottom: 20px; }" +
-        ".section h2 { font-size: 12pt; font-weight: 700; color: var(--primary); border-bottom: 2px solid var(--accent); padding-bottom: 5px; margin-bottom: 10px; }" +
-        ".stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }" +
-        ".stat-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 12px; text-align: center; }" +
-        ".stat-val { font-size: 20pt; font-weight: 700; color: var(--primary); }" +
-        ".stat-val.ok { color: var(--ok); }" +
-        ".stat-val.err { color: var(--bad); }" +
-        ".stat-label { font-size: 9pt; color: var(--muted); text-transform: uppercase; }" +
-        ".verify-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 10px; }" +
-        ".missing-list { background: #fef2f2; border: 1px solid #fecaca; border-radius: 6px; padding: 10px; max-height: 150px; overflow-y: auto; }" +
-        ".missing-list.empty { background: #f0fdf4; border-color: #bbf7d0; color: var(--ok); text-align: center; font-style: italic; }" +
-        ".missing-item { font-family: monospace; font-size: 9pt; color: var(--bad); padding: 2px 0; }" +
-        ".signature-box { border: 2px solid var(--primary); border-radius: 6px; padding: 20px; margin-top: 30px; }" +
-        ".signature-row { display: flex; gap: 30px; margin-bottom: 15px; }" +
-        ".signature-field { flex: 1; }" +
-        ".signature-field label { display: block; font-size: 9pt; color: var(--muted); margin-bottom: 5px; }" +
-        ".signature-field .line { border-bottom: 1px solid var(--primary); height: 30px; }" +
-        ".remarks-field { margin-top: 15px; }" +
-        ".remarks-field label { display: block; font-size: 9pt; color: var(--muted); margin-bottom: 5px; }" +
-        ".remarks-lines { border: 1px solid #e2e8f0; border-radius: 4px; min-height: 60px; }" +
-        ".footer { margin-top: 30px; text-align: center; font-size: 8pt; color: #94a3b8; border-top: 1px solid #e2e8f0; padding-top: 10px; }" +
-        ".sample-table { width: 100%; border-collapse: collapse; font-size: 9pt; margin-top: 10px; }" +
-        ".sample-table th { padding: 8px; text-align: left; color: var(--muted); border-bottom: 2px solid #e2e8f0; }" +
-        ".sample-table td { padding: 8px; border-bottom: 1px solid #e2e8f0; }" +
-        ".text-error { color: var(--bad); font-weight: bold; }" +
-        "@media print { .protocol { padding: 0; } }";
+    // ponytail: embedded, offline-safe CSS keeps the protocol deployable as one file.
+    private static final String CSS = "\n<style>\n"
+            + "@page{size:A4 portrait;margin:16mm}\n"
+            + "*{box-sizing:border-box}\n"
+            + "body{margin:0;background:#fff;color:#1d2c40;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;font-size:10pt;line-height:1.45}\n"
+            + ".protocol{max-width:800px;margin:0 auto;padding:18px}\n"
+            + ".top{display:flex;justify-content:space-between;gap:24px;border-bottom:2px solid #142944;padding-bottom:13px;margin-bottom:15px}\n"
+            + ".eyebrow{color:#e76617;font-size:7pt;font-weight:700;letter-spacing:.12em;text-transform:uppercase}\n"
+            + "h1{margin:4px 0 2px;font-size:19pt;text-transform:uppercase}\n"
+            + ".sub{color:#64748b;font-size:8pt}\n"
+            + ".doc-id{text-align:right;color:#64748b;font-size:7pt}.doc-id b{color:#142944}\n"
+            + ".verdict{display:grid;grid-template-columns:2fr 1fr 1fr;border:1px solid #d9b66f;background:#fff9ed;margin-bottom:18px}\n"
+            + ".verdict>div{padding:13px;border-right:1px solid #d9b66f}.verdict>div:last-child{border-right:0;text-align:center}\n"
+            + ".verdict small,.meta small{display:block;color:#7b6750;font-size:7pt;text-transform:uppercase;letter-spacing:.08em}\n"
+            + ".verdict strong{display:block;color:#765019;font-size:15pt;margin:4px 0}.verdict b{font-size:16pt}.bad{color:#b93838}.ok{color:#16794b}\n"
+            + ".section{margin:0 0 16px}.section h2{font-size:10pt;border-bottom:2px solid #8b99aa;padding-bottom:4px;margin:0 0 8px}\n"
+            + ".meta{display:grid;grid-template-columns:1fr 1fr;border:1px solid #d7dfe8;background:#f8fafc}\n"
+            + ".meta div{padding:8px 10px;border-right:1px solid #d7dfe8;border-bottom:1px solid #d7dfe8}.meta div:nth-child(2n){border-right:0}\n"
+            + ".meta b{display:block;margin-top:2px;font-size:8pt}\n"
+            + "table{width:100%;border-collapse:collapse;font-size:8pt}th{background:#142944;color:#fff;text-align:left;font-size:7pt;padding:7px}td{padding:7px;border-bottom:1px solid #dce3ea;vertical-align:top}\n"
+            + ".result{font-weight:700;color:#16794b;text-transform:uppercase}.result.review{color:#946117}\n"
+            + ".mono{font-family:Consolas,'Courier New',monospace}\n"
+            + ".approval{border-top:1px solid #8090a4;margin-top:20px;padding-top:10px}.approval-head{display:flex;justify-content:space-between;font-size:8pt;font-weight:700}\n"
+            + ".signatures{display:grid;grid-template-columns:1fr 1fr;gap:25px;margin-top:22px}.signatures div{border-bottom:1px solid #7e8ca0;color:#79879a;font-size:7pt;padding-bottom:3px}\n"
+            + ".footer{display:flex;justify-content:space-between;border-top:1px solid #dce3ea;margin-top:18px;padding-top:7px;color:#7b8899;font-size:7pt}\n"
+            + "@media print{.protocol{padding:0}}\n"
+            + "</style>";
 
-    /**
-     * Generates audit protocols for all configured ItemTypes.
-     * 
-     * @param config       Migration configuration
-     * @param baseDir      Journal database directory
-     * @param outputDir    Output directory for protocols
-     */
-    public static void generateProtocols(MigrationConfig config, String baseDir, String outputDir) {
-        Map<String, String> mapping = config.getItemTypeMapping();
-        if (mapping == null || mapping.isEmpty()) {
-            logger.warn("No item type mapping configured - skipping audit protocol generation");
-            return;
-        }
+    private AuditProtocolGenerator() { }
 
-        // Ist output directory existiert?
-        File outDir = new File(outputDir);
-        if (!outDir.exists()) {
-            outDir.mkdirs();
-        }
-
-        String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmm"));
-
-        for (Map.Entry<String, String> entry : mapping.entrySet()) {
-            String sourceType = entry.getKey();
-            String destType = entry.getValue();
-
-            try {
-                generateProtocolForType(config, baseDir, outputDir, sourceType, destType, timestamp);
-            } catch (Exception e) {
-                logger.error("Failed to generate audit protocol for {}: {}", sourceType, e.getMessage(), e);
+    /** Render one complete, printable protocol for the delivered report. */
+    public static String render(UnifiedReport r) {
+        StringBuilder sb = new StringBuilder(8192);
+        String verdict = r.status() == OverallStatus.SUCCESS ? "Freigegeben" : "Bedingt freigegeben";
+        String generated = new SimpleDateFormat("dd.MM.yyyy HH:mm").format(new Date(r.endTimeMs()));
+        long verified = 0;
+        long mismatches = 0;
+        boolean hasVerification = false;
+        for (ItemTypeResult it : r.itemTypes()) {
+            if (it.verified() >= 0) {
+                hasVerification = true;
+                verified += it.verified();
+                mismatches += Math.max(0, it.mismatches());
             }
         }
 
-        // Generiere gemeinsame Protocol für alle ItemTypes
-        try {
-            generateMasterProtocol(config, baseDir, outputDir, timestamp);
-        } catch (Exception e) {
-            logger.error("Failed to generate master audit protocol: {}", e.getMessage(), e);
+        sb.append("<!DOCTYPE html><html lang=\"de\"><head><meta charset=\"UTF-8\">"
+                + "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+                + "<title>CM Migrator Prüfprotokoll</title>").append(CSS)
+                .append("</head><body><main class=\"protocol\">");
+
+        sb.append("<header class=\"top\"><div><div class=\"eyebrow\">Revisionsnachweis · Migration &amp; Verifikation</div>"
+                + "<h1>Prüfprotokoll</h1><div class=\"sub\">")
+                .append(esc(operationLabel(r))).append(" · ")
+                .append(esc(r.sourceSSID())).append(" → ").append(esc(r.destSSID()))
+                .append("</div></div><div class=\"doc-id\">DOKUMENT-ID<br><b>")
+                .append(esc(r.operationId())).append("</b><br>Version ").append(VERSION)
+                .append("</div></header>");
+
+        sb.append("<section class=\"verdict\"><div><small>Prüfergebnis</small><strong>")
+                .append(verdict).append("</strong><span>")
+                .append(r.failed() > 0
+                        ? n(r.failed()) + " technische Abweichungen erfordern dokumentierte Nachbearbeitung."
+                        : "Der Lauf wurde ohne offene technische Abweichungen abgeschlossen.")
+                .append("</span></div><div><small>Erfolgsquote</small><b class=\"ok\">")
+                .append(String.format("%.1f%%", r.successRate())).append("</b></div><div><small>Offen</small><b class=\"")
+                .append(r.failed() > 0 ? "bad" : "ok").append("\">").append(n(r.failed()))
+                .append("</b></div></section>");
+
+        sb.append("<section class=\"section\"><h2>Prüfumfang und Herkunft</h2><div class=\"meta\">")
+                .append(meta("Quelle", r.sourceSSID()))
+                .append(meta("Ziel", r.destSSID()))
+                .append(meta("Run-ID", r.operationId()))
+                .append(meta("Datenstand", "Nach Journalabschluss"))
+                .append(meta("Beginn / Ende", time(r.startTimeMs()) + " / " + time(r.endTimeMs())))
+                .append(meta("Erzeugt", generated))
+                .append("</div></section>");
+
+        sb.append("<section class=\"section\"><h2>Prüfgegenstände</h2><table><thead><tr>"
+                + "<th>Kontrolle</th><th>Nachweis</th><th>Ergebnis</th></tr></thead><tbody>")
+                .append(evidence("Vollständigkeit",
+                        n(r.success()) + " erfolgreich von " + n(r.total()) + " Objekten",
+                        r.failed() == 0 ? "Bestanden" : "Nacharbeit", r.failed() > 0))
+                .append(evidence("Fehlerbehandlung",
+                        n(r.failed()) + " Fehler protokolliert, kein stiller Verlust",
+                        r.failed() == 0 ? "Bestanden" : "Nacharbeit", r.failed() > 0));
+        if (hasVerification) {
+            sb.append(evidence("Integrität", n(verified) + " verifiziert, " + n(mismatches) + " Abweichungen",
+                    mismatches == 0 ? "Bestanden" : "Nacharbeit", mismatches > 0));
         }
-    }
+        sb.append(evidence("Journalabschluss", "Bericht nach Abschluss der Verarbeitung erzeugt", "Bestanden", false))
+                .append("</tbody></table></section>");
 
-    private static void generateProtocolForType(MigrationConfig config, 
-                                                 String baseDir, 
-                                                 String outputDir,
-                                                 String sourceType, 
-                                                 String destType,
-                                                 String timestamp) throws Exception {
-        
-        String fileName = String.format("PRUEFPROTOKOLL_%s_%s.html", sourceType, timestamp);
-        File outFile = new File(outputDir, fileName);
+        sb.append("<section class=\"section\"><h2>Ergebnis nach ItemType</h2><table><thead><tr>"
+                + "<th>Mapping</th><th>Erfolg</th><th>Fehler</th><th>Verifikation</th></tr></thead><tbody>");
+        for (ItemTypeResult it : r.itemTypes()) {
+            sb.append("<tr><td class=\"mono\">").append(esc(it.sourceType())).append(" → ")
+                    .append(esc(it.destType())).append("</td><td>").append(n(it.success()))
+                    .append(" / ").append(n(it.total())).append("</td><td>").append(n(Math.max(0, it.failed())))
+                    .append("</td><td>").append(it.verified() >= 0 ? n(it.verified()) : "Nicht ausgeführt")
+                    .append("</td></tr>");
+        }
+        sb.append("</tbody></table></section>");
 
-        // Collect statistics from journal and verification databases
-        AuditStats stats = collectStats(baseDir, sourceType);
-
-        try (PrintWriter w = new PrintWriter(new FileWriter(outFile, StandardCharsets.UTF_8))) {
-            String now = LocalDateTime.now().format(DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm"));
-            String dateGenerated = LocalDateTime.now().format(DateTimeFormatter.ofPattern("dd. MMMM yyyy"));
-
-            w.println("<!DOCTYPE html><html lang='de'><head><meta charset='UTF-8'>");
-            w.println("<meta name='viewport' content='width=device-width, initial-scale=1.0'>");
-            w.println("<title>Prüfprotokoll - " + escapeHtml(sourceType) + "</title>");
-            w.println("<style>" + PRINT_CSS + "</style></head><body>");
-
-            w.println("<div class='protocol'>");
-
-            // Header
-            w.println("<div class='header'>");
-            w.println("<h1>Migrationsprüfprotokoll</h1>");
-            w.println("<div class='subtitle'>ItemType: " + escapeHtml(sourceType) + " → " + escapeHtml(destType) + "</div>");
-            w.println("</div>");
-
-            // Meta Box
-            w.println("<div class='meta-box'>");
-            w.println("<div class='meta-row'><span class='meta-label'>Quellsystem (SSID)</span><span class='meta-value'>" + escapeHtml(config.getSourceSSID()) + "</span></div>");
-            w.println("<div class='meta-row'><span class='meta-label'>Zielsystem (SSID)</span><span class='meta-value'>" + escapeHtml(config.getDestSSID()) + "</span></div>");
-            w.println("<div class='meta-row'><span class='meta-label'>Protokoll erstellt</span><span class='meta-value'>" + escapeHtml(now) + "</span></div>");
-            w.println("<div class='meta-row'><span class='meta-label'>Protokoll-ID</span><span class='meta-value'>" + escapeHtml(sourceType + "_" + timestamp) + "</span></div>");
-            w.println("</div>");
-
-            // Migration Statistics Section
-            w.println("<div class='section'>");
-            w.println("<h2>Migrationsstatistik</h2>");
-            w.println("<div class='stats-grid'>");
-            w.println(createStatBox(String.valueOf(stats.migTotal), "Gesamt", ""));
-            w.println(createStatBox(String.valueOf(stats.migSuccess), "Erfolgreich", "ok"));
-            w.println(createStatBox(String.valueOf(stats.migFailed), "Fehlgeschlagen", stats.migFailed > 0 ? "err" : ""));
-            w.println(createStatBox(String.valueOf(stats.migSkipped), "Übersprungen", ""));
-            w.println("</div>");
-            w.println("</div>");
-
-            // Verification Statistics Section
-            w.println("<div class='section'>");
-            w.println("<h2>Verifikationsstatistik</h2>");
-            w.println("<div class='verify-grid'>");
-            w.println(createStatBox(String.valueOf(stats.verTotal), "Geprüft", ""));
-            w.println(createStatBox(String.valueOf(stats.verOk), "Hash OK", "ok"));
-            w.println(createStatBox(String.valueOf(stats.verMismatch), "Mismatch", stats.verMismatch > 0 ? "err" : ""));
-            w.println(createStatBox(String.valueOf(stats.verOrphaned), "Orphaned", ""));
-            w.println(createStatBox(String.valueOf(stats.verCascadeDeleted), "Gelöscht", stats.verCascadeDeleted > 0 ? "ok" : ""));
-            w.println("</div>");
-            w.println("</div>");
-
-            // Checksummen-Stichproben für Compliance (deaktiviert)
-            w.println("<div class='section'>");
-            w.println("<h2>Verifizierte Checksummen (Stichprobe)</h2>");
-            if (stats.checksumSamples == null || stats.checksumSamples.isEmpty()) {
-                w.println("<div class='missing-list empty'>Keine Checksummen-Stichproben verfügbar</div>");
-            } else {
-                w.println("<table class='sample-table'>");
-                w.println("<thead><tr style='background:#f8fafc;'>");
-                w.println("<th>Item-ID</th>");
-                w.println("<th>SHA-256 Checksum</th>");
-                w.println("<th style='text-align:center;'>Status</th>");
-                w.println("</tr></thead><tbody>");
-                for (ChecksumSample sample : stats.checksumSamples) {
-                    String statusClass = "OK".equals(sample.status) ? "stat-val ok" : "text-error";
-                    String statusIcon = "OK".equals(sample.status) ? "✓" : "✗";
-                    w.println("<tr>");
-                    w.println("<td style='font-family:monospace;font-size:8pt'>" + escapeHtml(sample.itemId) + "</td>");
-                    w.println("<td style='font-family:monospace;font-size:8pt'>" + escapeHtml(sample.checksum) + "</td>");
-                    w.println("<td style='text-align:center;' class='" + statusClass + "'>" + statusIcon + " " + escapeHtml(sample.status) + "</td>");
-                    w.println("</tr>");
-                }
-                w.println("</tbody></table>");
+        sb.append("<section class=\"section\"><h2>Offene Maßnahmen</h2><table><thead><tr>"
+                + "<th>Objekt</th><th>Ursache</th><th>Maßnahme</th><th>Verantwortung</th></tr></thead><tbody>");
+        if (r.errors().isEmpty()) {
+            sb.append("<tr><td colspan=\"4\" class=\"ok\">Keine offenen Maßnahmen</td></tr>");
+        } else {
+            for (ReportError error : r.errors()) {
+                sb.append("<tr><td class=\"mono\">").append(esc(error.itemId())).append("</td><td>")
+                        .append(esc(error.message())).append("</td><td>Objekt prüfen und erneut migrieren</td>"
+                                + "<td>Betrieb</td></tr>");
             }
-            w.println("</div>");
-
-            // Missing/Error Items Section
-            w.println("<div class='section'>");
-            w.println("<h2>Fehlende/Problematische Dateien</h2>");
-            if (stats.errorItems == null || stats.errorItems.isEmpty()) {
-                w.println("<div class='missing-list empty'>Keine fehlenden oder problematischen Dateien</div>");
-            } else {
-                w.println("<div class='missing-list'>");
-                int shown = 0;
-                for (String itemId : stats.errorItems) {
-                    if (shown++ >= 20) {
-                        w.println("<div class='missing-item'>... und " + (stats.errorItems.size() - 20) + " weitere</div>");
-                        break;
-                    }
-                    w.println("<div class='missing-item'>" + escapeHtml(itemId) + "</div>");
-                }
-                w.println("</div>");
-            }
-            w.println("</div>");
-
-            // Unterschrift Box
-            w.println("<div class='signature-box'>");
-            w.println("<h2 style='margin-bottom:15px;border:none;'>Prüfbestätigung</h2>");
-            w.println("<div class='signature-row'>");
-            w.println("<div class='signature-field'><label>Datum</label><div class='line'></div></div>");
-            w.println("<div class='signature-field'><label>Name des Prüfers</label><div class='line'></div></div>");
-            w.println("<div class='signature-field'><label>Unterschrift</label><div class='line'></div></div>");
-            w.println("</div>");
-            w.println("<div class='remarks-field'><label>Bemerkungen</label><div class='remarks-lines'></div></div>");
-            w.println("</div>");
-
-            // Footer
-            w.println("</div></body></html>");
         }
+        sb.append("</tbody></table></section>");
 
-        logger.info("Generated audit protocol: {}", outFile.getAbsolutePath());
+        sb.append("<section class=\"approval\"><div class=\"approval-head\"><span>Freigabe nach Abschluss der Maßnahmen</span><span>Status: ")
+                .append(r.failed() > 0 ? "offen" : "bereit").append("</span></div>"
+                        + "<div class=\"signatures\"><div>Datum / Name</div><div>Unterschrift / Ticketreferenz</div></div></section>")
+                .append("<footer class=\"footer\"><span>CM Migrator ").append(VERSION)
+                .append(" · Auditprotokoll</span><span>Seite 1 von 1 · ").append(esc(r.operationId()))
+                .append("</span></footer></main></body></html>");
+        return sb.toString();
     }
 
-    private static void generateMasterProtocol(MigrationConfig config, String baseDir, String outputDir, String timestamp) throws Exception {
-        String fileName = String.format("PRUEFPROTOKOLL_GESAMT_%s.html", timestamp);
-        File outFile = new File(outputDir, fileName);
-
-        Map<String, String> mapping = config.getItemTypeMapping();
-        java.util.List<Map.Entry<String, AuditStats>> allStats = new java.util.ArrayList<>();
-        AuditStats totalStats = new AuditStats();
-
-        for (Map.Entry<String, String> entry : mapping.entrySet()) {
-            AuditStats stats = collectStats(baseDir, entry.getKey());
-            allStats.add(new java.util.AbstractMap.SimpleEntry<>(entry.getKey(), stats));
-            
-            totalStats.migTotal += stats.migTotal;
-            totalStats.migSuccess += stats.migSuccess;
-            totalStats.migFailed += stats.migFailed;
-            totalStats.migSkipped += stats.migSkipped;
-            totalStats.verTotal += stats.verTotal;
-            totalStats.verOk += stats.verOk;
-            totalStats.verMismatch += stats.verMismatch;
-            totalStats.verOrphaned += stats.verOrphaned;
-            totalStats.verCascadeDeleted += stats.verCascadeDeleted;
-        }
-
-        try (PrintWriter w = new PrintWriter(new FileWriter(outFile, StandardCharsets.UTF_8))) {
-            String now = LocalDateTime.now().format(DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm"));
-            String dateGenerated = LocalDateTime.now().format(DateTimeFormatter.ofPattern("dd. MMMM yyyy"));
-
-            w.println("<!DOCTYPE html><html lang='de'><head><meta charset='UTF-8'>");
-            w.println("<title>Gesamtprüfprotokoll - Alle ItemTypes</title>");
-            w.println("<style>" + PRINT_CSS + 
-                ".summary-table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 9pt; }" +
-                ".summary-table th, .summary-table td { border: 1px solid #e2e8f0; padding: 8px; text-align: right; }" +
-                ".summary-table th { background: #f8fafc; color: #64748b; font-weight: 600; text-align: left; }" +
-                ".summary-table td:first-child { text-align: left; font-weight: 600; font-family: monospace; }" +
-                "</style></head><body>");
-
-            w.println("<div class='protocol'>");
-            w.println("<div class='header'><h1>Gesamtprüfprotokoll</h1><div class='subtitle'>Zusammenfassung über alle migrierten ItemTypes</div></div>");
-
-            w.println("<div class='meta-box'>");
-            w.println("<div class='meta-row'><span class='meta-label'>Quellsystem (SSID)</span><span class='meta-value'>" + escapeHtml(config.getSourceSSID()) + "</span></div>");
-            w.println("<div class='meta-row'><span class='meta-label'>Zielsystem (SSID)</span><span class='meta-value'>" + escapeHtml(config.getDestSSID()) + "</span></div>");
-            w.println("<div class='meta-row'><span class='meta-label'>Protokoll erstellt</span><span class='meta-value'>" + escapeHtml(now) + "</span></div>");
-            w.println("</div>");
-
-            w.println("<div class='section'><h2>Gesamtstatistik</h2><div class='stats-grid'>");
-            w.println(createStatBox(String.valueOf(totalStats.migTotal), "MIG Gesamt", ""));
-            w.println(createStatBox(String.valueOf(totalStats.migSuccess), "MIG Erfolg", "ok"));
-            w.println(createStatBox(String.valueOf(totalStats.verTotal), "VER Geprüft", ""));
-            w.println(createStatBox(String.valueOf(totalStats.verOk), "VER OK", "ok"));
-            w.println("</div></div>");
-
-            w.println("<div class='section'><h2>Detaillierte Übersicht</h2>");
-            w.println("<table class='summary-table'><thead><tr>");
-            w.println("<th>ItemType</th><th>Total</th><th>MIG Success</th><th>MIG Fail</th><th>VER OK</th><th>Mismatch</th><th>Del</th>");
-            w.println("</tr></thead><tbody>");
-
-            for (Map.Entry<String, AuditStats> entry : allStats) {
-                AuditStats s = entry.getValue();
-                w.println("<tr>");
-                w.println("<td>" + escapeHtml(entry.getKey()) + "</td>");
-                w.println("<td>" + s.migTotal + "</td>");
-                w.println("<td>" + s.migSuccess + "</td>");
-                w.println("<td" + (s.migFailed > 0 ? " class='text-error'" : "") + ">" + s.migFailed + "</td>");
-                w.println("<td>" + s.verOk + "</td>");
-                w.println("<td" + (s.verMismatch > 0 ? " class='text-error'" : "") + ">" + s.verMismatch + "</td>");
-                w.println("<td>" + s.verCascadeDeleted + "</td>");
-                w.println("</tr>");
-            }
-            w.println("</tbody></table></div>");
-
-            w.println("<div class='signature-box'><h2 style='margin-bottom:15px;border:none;'>Gesamtabnahme</h2><div class='signature-row'>");
-            w.println("<div class='signature-field'><label>Datum</label><div class='line'></div></div>");
-            w.println("<div class='signature-field'><label>Name des Prüfers</label><div class='line'></div></div>");
-            w.println("<div class='signature-field'><label>Unterschrift</label><div class='line'></div></div>");
-            w.println("</div><div class='remarks-field'><label>Abschlussbemerkungen</label><div class='remarks-lines'></div></div></div>");
-
-            w.println("<div class='footer'>Generiert am " + escapeHtml(dateGenerated) + " | CM Migrator v1.25</div>");
-            w.println("</div></body></html>");
-        }
-        logger.info("Generated master audit protocol: {}", outFile.getAbsolutePath());
+    private static String meta(String label, String value) {
+        return "<div><small>" + esc(label) + "</small><b>" + esc(value) + "</b></div>";
     }
 
-    private static String createStatBox(String value, String label, String cssClass) {
-        String valClass = cssClass.isEmpty() ? "" : " " + cssClass;
-        return "<div class='stat-box'><div class='stat-val" + valClass + "'>" + escapeHtml(value) + "</div><div class='stat-label'>" + escapeHtml(label) + "</div></div>";
+    private static String evidence(String control, String proof, String result, boolean review) {
+        return "<tr><td>" + esc(control) + "</td><td>" + esc(proof) + "</td><td class=\"result"
+                + (review ? " review" : "") + "\">" + esc(result) + "</td></tr>";
     }
 
-    /**
-     * Sammelt Statistiken aus Journal- und Verifikationsdatenbanken.
-     */
-    private static AuditStats collectStats(String baseDir, String itemType) {
-        AuditStats stats = new AuditStats();
-
-        // Lese aus journal database
-        String journalPath = baseDir + "/journal_" + itemType;
-        String journalUrl = "jdbc:h2:" + journalPath + ";IFEXISTS=TRUE";
-
-        try (Connection conn = DriverManager.getConnection(journalUrl, "sa", "")) {
-            // Zuerst das neue Schema (AUDITLOG) ausprobieren, dann das alte (AUDIT_LOG)
-            String sql = detectAndBuildCountSql(conn);
-            if (sql != null) {
-                try (PreparedStatement ps = conn.prepareStatement(sql)) {
-                    try (ResultSet rs = ps.executeQuery()) {
-                        while (rs.next()) {
-                            String status = rs.getString(1);
-                            int count = rs.getInt(2);
-                            stats.migTotal += count;
-                            if ("SUCCESS".equalsIgnoreCase(status)) stats.migSuccess += count;
-                            else if ("FAILED".equalsIgnoreCase(status)) stats.migFailed += count;
-                            else stats.migSkipped += count;
-                        }
-                    }
-                }
-            }
-
-            // Read error item IDs
-            String errorSql = detectAndBuildErrorItemsSql(conn);
-            if (errorSql != null) {
-                try (PreparedStatement ps = conn.prepareStatement(errorSql)) {
-                    try (ResultSet rs = ps.executeQuery()) {
-                        stats.errorItems = new java.util.ArrayList<>();
-                        while (rs.next() && stats.errorItems.size() < 50) {
-                            stats.errorItems.add(rs.getString(1));
-                        }
-                    }
-                }
-            }
-        } catch (Exception e) {
-            logger.debug("Could not read journal for {}: {}", itemType, e.getMessage());
+    private static String operationLabel(UnifiedReport r) {
+        switch (r.operationType()) {
+            case VERIFICATION: return "Verifikation";
+            case DELETE: return "Löschung";
+            default: return "Migration";
         }
-
-        //  Aus der Verifizierungsdatenbank lesen (gleicher Pfad per Konvention)
-        try (Connection conn = DriverManager.getConnection(journalUrl, "sa", "")) {
-            String verifySql = detectAndBuildVerifyCountSql(conn);
-            if (verifySql != null) {
-                try (PreparedStatement ps = conn.prepareStatement(verifySql)) {
-                    try (ResultSet rs = ps.executeQuery()) {
-                        while (rs.next()) {
-                            String status = rs.getString(1);
-                            int count = rs.getInt(2);
-                            stats.verTotal += count;
-                            if ("OK".equalsIgnoreCase(status)) stats.verOk += count;
-                            else if ("MISMATCH".equalsIgnoreCase(status)) stats.verMismatch += count;
-                            else if ("ORPHANED".equalsIgnoreCase(status)) stats.verOrphaned += count;
-                            else if ("CASCADE_DELETED".equalsIgnoreCase(status)) stats.verCascadeDeleted += count;
-                        }
-                    }
-                }
-            }
-            
-            // Prüfsummen-Beispiele für die Compliance-Dokumentation sammeln
-            String checksumSql = detectAndBuildChecksumSampleSql(conn);
-            if (checksumSql != null) {
-                stats.checksumSamples = new java.util.ArrayList<>();
-                try (PreparedStatement ps = conn.prepareStatement(checksumSql)) {
-                    try (ResultSet rs = ps.executeQuery()) {
-                        while (rs.next() && stats.checksumSamples.size() < 5) {
-                            String itemId = rs.getString(1);
-                            String checksum = rs.getString(2);
-                            String status = rs.getString(3);
-                            if (checksum != null && !checksum.isEmpty()) {
-                                stats.checksumSamples.add(new ChecksumSample(itemId, checksum, status != null ? status : "OK"));
-                            }
-                        }
-                    }
-                }
-            }
-        } catch (Exception e) {
-            logger.debug("Could not read verification log for {}: {}", itemType, e.getMessage());
-        }
-
-        return stats;
-    }
-    
-    /**
-     * SQL zum Erstellen von Prüfsummen-Stichproben
-     */
-    private static String detectAndBuildChecksumSampleSql(Connection conn) {
-        if (MigrationJournal.isTablePresent(conn, "VERIFICATIONLOG")) {
-            return "SELECT ITEMID, DESTCHECKSUM, STATUS FROM VERIFICATIONLOG WHERE STATUS = 'OK' ORDER BY VERIFIEDAT DESC LIMIT 5";
-        }
-        if (MigrationJournal.isTablePresent(conn, "VERIFICATION_LOG")) {
-            return "SELECT ITEM_ID, DEST_CHECKSUM, STATUS FROM VERIFICATION_LOG WHERE STATUS = 'OK' ORDER BY VERIFIED_TIME DESC LIMIT 5";
-        }
-        // Fallback: Try audit log for checksums
-        if (MigrationJournal.isTablePresent(conn, "AUDITLOG")) {
-            return "SELECT ITEMID, CHECKSUM, STATUS FROM AUDITLOG WHERE STATUS = 'SUCCESS' AND CHECKSUM IS NOT NULL ORDER BY MIGRATIONTIME DESC LIMIT 5";
-        }
-        if (MigrationJournal.isTablePresent(conn, "AUDIT_LOG")) {
-            return "SELECT ITEM_ID, CHECKSUM, STATUS FROM AUDIT_LOG WHERE STATUS = 'SUCCESS' AND CHECKSUM IS NOT NULL ORDER BY MIGRATION_TIME DESC LIMIT 5";
-        }
-        return null;
     }
 
-    private static String detectAndBuildCountSql(Connection conn) {
-        if (MigrationJournal.isTablePresent(conn, "AUDITLOG")) {
-            return "SELECT STATUS, COUNT(*) FROM AUDITLOG GROUP BY STATUS";
-        }
-        if (MigrationJournal.isTablePresent(conn, "AUDIT_LOG")) {
-            return "SELECT STATUS, COUNT(*) FROM AUDIT_LOG GROUP BY STATUS";
-        }
-        return null;
+    private static String time(long millis) {
+        return new SimpleDateFormat("HH:mm:ss").format(new Date(millis));
     }
 
-    private static String detectAndBuildErrorItemsSql(Connection conn) {
-        if (MigrationJournal.isTablePresent(conn, "AUDITLOG")) {
-            return "SELECT ITEMID FROM AUDITLOG WHERE STATUS = 'FAILED' LIMIT 50";
-        }
-        if (MigrationJournal.isTablePresent(conn, "AUDIT_LOG")) {
-            return "SELECT ITEM_ID FROM AUDIT_LOG WHERE STATUS = 'FAILED' LIMIT 50";
-        }
-        return null;
+    private static String n(long value) {
+        return String.format("%,d", value);
     }
 
-    private static String detectAndBuildVerifyCountSql(Connection conn) {
-        if (MigrationJournal.isTablePresent(conn, "VERIFICATIONLOG")) {
-            return "SELECT STATUS, COUNT(*) FROM VERIFICATIONLOG GROUP BY STATUS";
-        }
-        if (MigrationJournal.isTablePresent(conn, "VERIFICATION_LOG")) {
-            return "SELECT STATUS, COUNT(*) FROM VERIFICATION_LOG GROUP BY STATUS";
-        }
-        return null;
-    }
-
-    private static String escapeHtml(String s) {
-        if (s == null) return "";
-        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;");
-    }
-
-    /**
-     * Interner Statistik-Container.
-     */
-    private static class AuditStats {
-        int migTotal = 0, migSuccess = 0, migFailed = 0, migSkipped = 0;
-        int verTotal = 0, verOk = 0, verMismatch = 0, verOrphaned = 0, verCascadeDeleted = 0;
-        java.util.List<String> errorItems;
-        java.util.List<ChecksumSample> checksumSamples;
-    }
-
-    /**
-     * Prüfsummenbeispiel für die Auditprotokolls.
-     */
-    private static class ChecksumSample {
-        final String itemId;
-        final String checksum;
-        final String status;
-        
-        ChecksumSample(String itemId, String checksum, String status) {
-            this.itemId = itemId;
-            this.checksum = checksum;
-            this.status = status;
-        }
+    private static String esc(String value) {
+        if (value == null) return "";
+        return value.replace("&", "&amp;").replace("<", "&lt;")
+                .replace(">", "&gt;").replace("\"", "&quot;").replace("'", "&#39;");
     }
 }

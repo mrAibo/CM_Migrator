@@ -4,15 +4,14 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>CM Migrator Process</title>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
   <style>
     :root{--bg:#f6f7fb;--panel:#fff;--border:#e2e8f0;--text:#0f172a;--muted:#64748b;--accent:#f97316;--ok:#16a34a;--bad:#dc2626;--warn:#f59e0b;--blue:#2563eb;--shadow:0 10px 28px rgba(15,23,42,.08)}
-    *{box-sizing:border-box} body{margin:0;background:var(--bg);font-family:Inter,system-ui,sans-serif;color:var(--text)}
+    *{box-sizing:border-box} body{margin:0;background:var(--bg);font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:var(--text)}
     .wrap{max-width:1180px;margin:24px auto;padding:0 18px}.top{background:#0f172a;color:#fff;border-radius:18px;padding:20px;box-shadow:var(--shadow);display:flex;justify-content:space-between;gap:18px;align-items:flex-start}
     h1{margin:0;font-size:22px}.sub{margin-top:6px;color:#cbd5e1;font-family:JetBrains Mono,monospace;font-size:12px}.badge{padding:7px 12px;border-radius:999px;font-weight:800;font-size:12px;background:var(--warn);color:#fff}.badge.RUNNING,.badge.STARTING{background:var(--ok)}.badge.COMPLETED{background:var(--blue)}.badge.FAILED{background:var(--bad)}.badge.STOPPED,.badge.STOPPING{background:#64748b}
     .grid{display:grid;grid-template-columns:1fr 340px;gap:18px;margin-top:18px}@media(max-width:900px){.grid{grid-template-columns:1fr}}
     .card{background:var(--panel);border:1px solid var(--border);border-radius:16px;padding:18px;box-shadow:var(--shadow);margin-bottom:18px}.card h3{margin:0 0 14px;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.12em}.kv{display:grid;gap:10px}.row{display:flex;justify-content:space-between;gap:12px;padding:10px 12px;border:1px solid var(--border);border-radius:12px;background:#f8fafc}.k{font-size:12px;color:var(--muted)}.v{font-size:12px;font-family:JetBrains Mono,monospace;font-weight:700;text-align:right;word-break:break-word}.timeline{display:grid;gap:10px}.step{display:flex;gap:12px;align-items:center;padding:12px;border:1px solid var(--border);border-radius:12px;background:#f8fafc}.dot{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:#e2e8f0;font-weight:800}.step.active .dot{background:#dcfce7;color:var(--ok)}.step.done .dot{background:#dbeafe;color:var(--blue)}
-    .links{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}@media(max-width:600px){.links{grid-template-columns:1fr}}.links a,.btn{display:block;text-decoration:none;text-align:center;border:none;border-radius:10px;padding:11px 12px;font-weight:800;cursor:pointer}.links a{background:#fff7ed;color:#ea580c;border:1px solid #fed7aa}.btn-stop{background:var(--bad);color:#fff}.btn-back{background:#475569;color:#fff}.log{font-family:JetBrains Mono,monospace;background:#0b1220;color:#e5e7eb;border-radius:14px;padding:14px;min-height:300px;max-height:520px;overflow:auto;font-size:12px;line-height:1.6;white-space:pre-wrap}.muted{color:var(--muted)}
+    .links{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}@media(max-width:600px){.links{grid-template-columns:1fr}}.links a,.btn{display:block;text-decoration:none;text-align:center;border:none;border-radius:10px;padding:11px 12px;font-weight:800;cursor:pointer}.links a{background:#fff7ed;color:#ea580c;border:1px solid #fed7aa}.btn-stop{background:var(--bad);color:#fff}.btn-back{background:#475569;color:#fff}.btn:disabled{opacity:.45;cursor:not-allowed}.log{font-family:JetBrains Mono,monospace;background:#0b1220;color:#e5e7eb;border-radius:14px;padding:14px;min-height:300px;max-height:520px;overflow:auto;font-size:12px;line-height:1.6;white-space:pre-wrap}.muted{color:var(--muted)}
   </style>
 </head>
 <body>
@@ -54,14 +53,13 @@
           <h3>Links</h3>
           <div class="links">
             <a id="dashboard" href="#" target="_blank">Dashboard</a>
-            <a id="migrationReport" href="#" target="_blank">Migration report</a>
-            <a id="verificationReport" href="#" target="_blank">Verification report</a>
+            <a id="reports" href="#" target="_blank">Report &amp; Prüfprotokoll</a>
             <a href="/" target="_self">Back to WebGUI</a>
           </div>
         </div>
         <div class="card">
           <h3>Actions</h3>
-          <button class="btn btn-stop" onclick="stopProcess()">Stop gracefully</button>
+          <button class="btn btn-stop" id="stopProcessButton" onclick="stopProcess()" disabled>Stop gracefully</button>
           <div style="height:10px"></div>
           <button class="btn btn-back" onclick="copyLink()">Copy process link</button>
         </div>
@@ -74,6 +72,14 @@ const runId = params.get('runId') || '';
 let lastStatus = '';
 function fmtTime(ms){ if(!ms) return '--'; return new Date(ms).toLocaleString(); }
 function esc(s){ return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+async function requestJson(url, options){
+  const r=await fetch(url,Object.assign({cache:'no-store'},options||{}));
+  const text=await r.text();
+  let data={};
+  try{ data=text?JSON.parse(text):{}; }catch(e){ throw new Error('Invalid server response'); }
+  if(!r.ok) throw new Error(data.error||('HTTP '+r.status));
+  return data;
+}
 function stepHtml(p){
   const mode = (p.mode || '').toLowerCase();
   const current = (p.currentStep || '').toLowerCase();
@@ -88,21 +94,27 @@ function stepHtml(p){
 async function poll(){
   try{
     const url = '/api/process' + (runId ? ('?runId=' + encodeURIComponent(runId)) : '');
-    const r = await fetch(url,{cache:'no-store'});
-    const data = await r.json();
+    const data = await requestJson(url);
     const p = data.process;
-    if(!p){ document.getElementById('log').textContent='No process found.'; return; }
+    if(!p){
+      const status=document.getElementById('status');
+      status.textContent='IDLE'; status.className='badge STOPPED';
+      document.getElementById('timeline').innerHTML='<div class="step"><div class="dot">–</div><div><b>No active process</b><br><span class="muted">Start an operation in the WebGUI</span></div></div>';
+      document.getElementById('log').textContent='No process found.';
+      document.getElementById('stopProcessButton').disabled=true;
+      return;
+    }
     document.getElementById('runId').textContent='runId: ' + p.runId;
     document.getElementById('profile').textContent='profile: ' + (p.profile || '--');
     const status = document.getElementById('status'); status.textContent=p.status; status.className='badge ' + p.status;
+    document.getElementById('stopProcessButton').disabled=!['STARTING','RUNNING','STOPPING'].includes(p.status);
     document.getElementById('mode').textContent=p.mode || '--';
     document.getElementById('step').textContent=p.currentStep || '--';
     document.getElementById('config').textContent=p.configFile || '--';
     document.getElementById('started').textContent=fmtTime(p.startedAtMs);
     document.getElementById('finished').textContent=fmtTime(p.finishedAtMs);
     document.getElementById('dashboard').href=p.dashboardUrl || '#';
-    document.getElementById('migrationReport').href=p.migrationReportUrl || '#';
-    document.getElementById('verificationReport').href=p.verificationReportUrl || '#';
+    document.getElementById('reports').href=p.reportsUrl || '#';
     document.getElementById('timeline').innerHTML=stepHtml(p);
     document.getElementById('log').textContent=(p.log || []).join('\n') || 'No log entries yet.';
     if(lastStatus !== p.status){ lastStatus = p.status; }
@@ -110,8 +122,10 @@ async function poll(){
 }
 async function stopProcess(){
   if(!confirm('Stop this process gracefully?')) return;
-  await fetch('/api/process/stop' + (runId ? ('?runId=' + encodeURIComponent(runId)) : ''), {method:'POST'});
-  poll();
+  try{
+    await requestJson('/api/process/stop' + (runId ? ('?runId=' + encodeURIComponent(runId)) : ''), {method:'POST'});
+    poll();
+  }catch(e){ document.getElementById('log').textContent='Stop rejected: ' + e.message; }
 }
 function copyLink(){ navigator.clipboard?.writeText(location.href); }
 setInterval(poll, 2000); poll();

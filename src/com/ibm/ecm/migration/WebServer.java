@@ -26,6 +26,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.List;
+import java.util.Locale;
 import java.util.Properties;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
@@ -70,8 +71,7 @@ public class WebServer {
         final String configFile;
         final String processUrl;
         final String dashboardUrl;
-        final String migrationReportUrl;
-        final String verificationReportUrl;
+        final String reportsUrl;
         final long startedAtMs;
         final List<String> logTail = new ArrayList<>();
         volatile String status = "STARTING";
@@ -81,15 +81,14 @@ public class WebServer {
         volatile Thread thread;
 
         ProcessState(String runId, String mode, String profile, String configFile,
-                     String dashboardUrl, String migrationReportUrl, String verificationReportUrl) {
+                     String dashboardUrl, String reportsUrl) {
             this.runId = runId;
             this.mode = mode;
             this.profile = profile;
             this.configFile = configFile;
             this.processUrl = "/process.html?runId=" + runId;
             this.dashboardUrl = dashboardUrl;
-            this.migrationReportUrl = migrationReportUrl;
-            this.verificationReportUrl = verificationReportUrl;
+            this.reportsUrl = reportsUrl;
             this.startedAtMs = System.currentTimeMillis();
             appendLog("Process created: mode=" + mode + ", profile=" + profile + ", config=" + configFile);
         }
@@ -495,8 +494,7 @@ public class WebServer {
                             profile == null || profile.isEmpty() ? stripPropertiesSuffix(configPath.getFileName().toString()) : profile,
                             configPath.toString().replace('\\', '/'),
                             monitorBase + "/status.html",
-                            monitorBase + "/migration_report.html",
-                            monitorBase + "/verification_report.html");
+                            monitorBase + "/reports/");
                     state = newState;
 
                     processRegistry.put(runId, newState);
@@ -516,8 +514,7 @@ public class WebServer {
                                     + ",\"processUrl\":\"" + escapeJson(newState.processUrl) + "\""
                                     + ",\"processAbsoluteUrl\":\"" + escapeJson(processAbsoluteUrl) + "\""
                                     + ",\"dashboardUrl\":\"" + escapeJson(newState.dashboardUrl) + "\""
-                                    + ",\"migrationReportUrl\":\"" + escapeJson(newState.migrationReportUrl) + "\""
-                                    + ",\"verificationReportUrl\":\"" + escapeJson(newState.verificationReportUrl) + "\"}");
+                                    + ",\"reportsUrl\":\"" + escapeJson(newState.reportsUrl) + "\"}");
                 } catch (Exception e) {
                     if (slotReserved && !threadStarted) {
                         if (thread != null) migrationThread.compareAndSet(thread, null);
@@ -751,25 +748,25 @@ public class WebServer {
                     
                     if (results.sourceBench != null && results.sourceBench.success) {
                         json.append(",\"source\":{");
-                        json.append("\"latencyMs\":").append(String.format("%.1f", results.sourceBench.latencyMs));
-                        json.append(",\"throughputMBps\":").append(String.format("%.1f", results.sourceBench.throughputMBps));
-                        json.append(",\"itemsPerSec\":").append(String.format("%.0f", results.sourceBench.itemsPerSec));
+                        json.append("\"latencyMs\":").append(String.format(Locale.ROOT, "%.1f", results.sourceBench.latencyMs));
+                        json.append(",\"throughputMBps\":").append(String.format(Locale.ROOT, "%.1f", results.sourceBench.throughputMBps));
+                        json.append(",\"itemsPerSec\":").append(String.format(Locale.ROOT, "%.0f", results.sourceBench.itemsPerSec));
                         json.append("}");
                     }
                     
                     if (results.destBench != null && results.destBench.success) {
                         json.append(",\"dest\":{");
-                        json.append("\"latencyMs\":").append(String.format("%.1f", results.destBench.latencyMs));
-                        json.append(",\"throughputMBps\":").append(String.format("%.1f", results.destBench.throughputMBps));
-                        json.append(",\"itemsPerSec\":").append(String.format("%.0f", results.destBench.itemsPerSec));
+                        json.append("\"latencyMs\":").append(String.format(Locale.ROOT, "%.1f", results.destBench.latencyMs));
+                        json.append(",\"throughputMBps\":").append(String.format(Locale.ROOT, "%.1f", results.destBench.throughputMBps));
+                        json.append(",\"itemsPerSec\":").append(String.format(Locale.ROOT, "%.0f", results.destBench.itemsPerSec));
                         json.append("}");
                     }
                     
                     if (results.ioBench != null && results.ioBench.success) {
                         json.append(",\"io\":{");
-                        json.append("\"diskWriteMBps\":").append(String.format("%.1f", results.ioBench.diskWriteMBps));
-                        json.append(",\"diskReadMBps\":").append(String.format("%.1f", results.ioBench.diskReadMBps));
-                        json.append(",\"h2InsertRowsPerSec\":").append(String.format("%.0f", results.ioBench.h2InsertRowsPerSec));
+                        json.append("\"diskWriteMBps\":").append(String.format(Locale.ROOT, "%.1f", results.ioBench.diskWriteMBps));
+                        json.append(",\"diskReadMBps\":").append(String.format(Locale.ROOT, "%.1f", results.ioBench.diskReadMBps));
+                        json.append(",\"h2InsertRowsPerSec\":").append(String.format(Locale.ROOT, "%.0f", results.ioBench.h2InsertRowsPerSec));
                         json.append("}");
                     }
                     
@@ -836,8 +833,8 @@ public class WebServer {
                     json.append(",\"failed\":").append(stats.getFailedItems());
                     json.append(",\"skipped\":").append(stats.getSkippedItems());
                     json.append(",\"deleted\":").append(stats.getDeletedItems());
-                    json.append(",\"percent\":").append(String.format("%.1f", percent));
-                    json.append(",\"speed\":").append(String.format("%.1f", speed));
+                    json.append(",\"percent\":").append(String.format(Locale.ROOT, "%.1f", percent));
+                    json.append(",\"speed\":").append(String.format(Locale.ROOT, "%.1f", speed));
                     json.append(",\"elapsedMs\":").append(elapsed);
                     json.append(",\"etaSeconds\":").append(etaSeconds);
                     json.append("}");
@@ -923,7 +920,7 @@ public class WebServer {
                 long processed = stats.getProcessedItems();
                 double percent = total > 0 ? (100.0 * processed / total) : 0;
                 
-                json.append(",\"percent\":").append(String.format("%.1f", percent));
+                json.append(",\"percent\":").append(String.format(Locale.ROOT, "%.1f", percent));
                 json.append(",\"processed\":").append(processed);
                 json.append(",\"total\":").append(total);
             }
@@ -1060,8 +1057,7 @@ public class WebServer {
         json.append("\"finishedAtMs\":").append(state.finishedAtMs).append(',');
         json.append("\"processUrl\":\"").append(escapeJson(state.processUrl)).append("\",");
         json.append("\"dashboardUrl\":\"").append(escapeJson(state.dashboardUrl)).append("\",");
-        json.append("\"migrationReportUrl\":\"").append(escapeJson(state.migrationReportUrl)).append("\",");
-        json.append("\"verificationReportUrl\":\"").append(escapeJson(state.verificationReportUrl)).append("\"");
+        json.append("\"reportsUrl\":\"").append(escapeJson(state.reportsUrl)).append("\"");
 
         MigrationStats stats = currentStats.get();
         if (stats != null) {
