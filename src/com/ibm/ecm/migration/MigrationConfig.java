@@ -14,8 +14,10 @@ import java.io.IOException;
 import java.util.Base64;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
 
 /**
  * Konfigurations-Loader für den IBM CM Migrator.
@@ -353,6 +355,15 @@ public class MigrationConfig {
 
     public String getFilterPredicate() {
         return prop("FILTER_PREDICATE", "").trim();
+    }
+
+    public Set<String> getIgnoredMigrationAttributes() {
+        Set<String> names = new LinkedHashSet<>();
+        for (String value : prop("MIGRATION_IGNORED_ATTRIBUTES", "").split(",")) {
+            String name = value.trim();
+            if (!name.isEmpty()) names.add(name);
+        }
+        return Collections.unmodifiableSet(names);
     }
 
     public boolean isDryRun() {

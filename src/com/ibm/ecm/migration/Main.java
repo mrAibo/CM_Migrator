@@ -1,6 +1,7 @@
 package com.ibm.ecm.migration;
 
 import java.util.concurrent.*;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -44,6 +45,15 @@ public class Main {
 
         MigrationConfig config = new MigrationConfig(configPath);
         OperationalPolicy.enforceCascadeDeleteDisabled(config);
+        OperationalPolicy.validateRunConfiguration(config);
+
+        if (!"DELETE".equalsIgnoreCase(config.getOperationMode())) {
+            boolean internal = config.getSourceSSID().equals(config.getDestSSID());
+            logger.info("Migration topology: {}", internal ? "INTERNAL_SAME_CM" : "CROSS_CM");
+            if (!internal) {
+                logger.warn("Cross-CM migration does not rewrite SAP or other external references.");
+            }
+        }
 
         SdkCapabilityProbe.logCapabilities();
         SdkCapabilityProbe.enforceFailFast();
@@ -136,25 +146,31 @@ public class Main {
 
         // ── Declarations that must outlive the migration try/finally
         RunTerminationException terminalOutcome = null;
+        RunTerminationException deleteResidualOutcome = null;
         WorkerTermination.Outcome termination = null;
         boolean aborted = false;
         boolean journalClosed = false;
+        boolean workersTerminated = false;
 
         // ─── Connection Pool ───
         try {
             CMConnectionPool pool = new CMConnectionPool(config);
         pool.init();
         MigrationMetrics.register(stats, queue, config.getSourceSSID(), config.getDestSSID());
-        startResourceMonitor();
+        Thread resourceMonitorThread = startResourceMonitor();
 
         // Start Producer & Consumers
         synchronized (current) { current.phase = OperatorConsole.Phase.DISCOVERING; }
+        ItemMigrator.clearRunCache();
+        java.util.Set<String> ignoredAttributes = config.getIgnoredMigrationAttributes();
         Producer producer = new Producer(queue, config, journal, stats, workerFailureState);
         workerExecutor.submit(workerFailureState.guard(
                 producer, ShutdownCoordinator::requestShutdown));
 
         for (int i = 0; i < threadCount; i++) {
-            Consumer consumer = new Consumer(queue, new ItemMigrator(pool), journal, stats, config);
+            Consumer consumer = new Consumer(queue,
+                    new ItemMigrator(pool, ignoredAttributes),
+                    journal, stats, config);
             workerExecutor.submit(workerFailureState.guard(
                     consumer, ShutdownCoordinator::requestShutdown));
         }
@@ -176,7 +192,7 @@ public class Main {
                     "Migration interrupted by operator request.", t, e);
         }
 
-        boolean workersTerminated = termination.terminated();
+        workersTerminated = termination.terminated();
         synchronized (current) { current.phase = OperatorConsole.Phase.DRAINING_WORKERS; }
         if (termination.timedOut()) {
             terminalOutcome = new RunTerminationException(
@@ -197,6 +213,27 @@ public class Main {
                     "Migration stopped by shutdown request.", workersTerminated, null);
         }
         aborted = terminalOutcome != null;
+
+        if (!aborted && workersTerminated
+                && "DELETE".equalsIgnoreCase(config.getOperationMode())
+                && !config.isDryRun()) {
+            try {
+                Map<String, Long> residuals = countDeleteResiduals(pool, config);
+                long residualCount = 0;
+                for (Long count : residuals.values()) residualCount += count;
+                stats.recordResidualFailures(residualCount);
+                try {
+                    OperationalPolicy.requireNoDeleteResiduals(residuals);
+                } catch (RunTerminationException e) {
+                    deleteResidualOutcome = e;
+                }
+            } catch (Exception e) {
+                stats.recordResidualFailures(1);
+                deleteResidualOutcome = new RunTerminationException(
+                        RunTerminationException.Reason.FAILED,
+                        "Source delete residual query failed.", true, e);
+            }
+        }
 
         // ─── Journal close before reports (PR #13 invariant) ───
         journalClosed = false;
@@ -237,6 +274,16 @@ public class Main {
                                 result.reportPath(), result.sent(), result.transport());
                         if (result.errorMessage() != null) {
                             logger.error("Report delivery issue: {}", result.errorMessage());
+                            if (!result.localArtifactWritten()) {
+                                logger.error("Report artifact write failed — promotion to terminal outcome.");
+                                if (terminalOutcome == null) {
+                                    terminalOutcome = new RunTerminationException(
+                                            RunTerminationException.Reason.FAILED,
+                                            "Report artifact write failed: " + result.errorMessage(),
+                                            workersTerminated, null);
+                                    aborted = true;
+                                }
+                            }
                         }
                     } else {
                         logger.info("REPORT_ENABLED=false — skipping unified report generation.");
@@ -247,6 +294,11 @@ public class Main {
             }
         } else {
             logger.warn("Migration did not complete normally. Skipping reports and email.");
+        }
+
+        if (terminalOutcome == null && deleteResidualOutcome != null) {
+            terminalOutcome = deleteResidualOutcome;
+            aborted = true;
         }
 
         if (terminalOutcome == null && stats.getFailedItems() > 0) {
@@ -262,8 +314,12 @@ public class Main {
                 try { journal.close(); } catch (Exception ignored) {}
             }
             pool.close();
+            resourceMonitorThread.interrupt();
             monitorThread.interrupt();
-            try { monitorThread.join(5000); } catch (InterruptedException e) {
+            try {
+                resourceMonitorThread.join(5000);
+                monitorThread.join(5000);
+            } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 if (terminalOutcome == null)
                     terminalOutcome = new RunTerminationException(
@@ -288,10 +344,18 @@ public class Main {
             }
         }
         } finally {
+            // Stop the console display even when migration fails early
             consoleThread.interrupt();
             try { consoleThread.join(1000); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
             OperatorConsole.finalRender(current);
             System.out.print(OperatorConsole.showCursor());
+
+            // Cleanup when pool/workers were never started (init failure)
+            if (!workersTerminated && !journalClosed) {
+                try { journal.close(); } catch (Exception ignored) {}
+                monitorThread.interrupt();
+                try { monitorThread.join(3000); } catch (InterruptedException ignored) {}
+            }
         }
 
         // ─── Console summary (after dashboard is done) ───
@@ -307,13 +371,29 @@ public class Main {
         workerFailureState.throwIfPresent("Migration worker failed");
     }
 
+    private static Map<String, Long> countDeleteResiduals(
+            CMConnectionPool pool, MigrationConfig config) throws Exception {
+        Map<String, Long> residuals = new LinkedHashMap<>();
+        CMConnection source = pool.borrowSource();
+        try {
+            for (String itemType : config.getItemTypeMapping().keySet()) {
+                String query = Producer.buildQuery(itemType, config.getFilterPredicate());
+                residuals.put(itemType,
+                        Producer.countCandidates(source.getDatastore(), query));
+            }
+        } finally {
+            pool.returnSource(source);
+        }
+        return residuals;
+    }
+
     private static OperatorConsole.JournalHealth journalHealthFromString(String s) {
         if (s == null) return OperatorConsole.JournalHealth.UNKNOWN;
         try { return OperatorConsole.JournalHealth.valueOf(s); }
         catch (IllegalArgumentException e) { return OperatorConsole.JournalHealth.UNKNOWN; }
     }
 
-    private static void startResourceMonitor() {
+    private static Thread startResourceMonitor() {
         Thread t = new Thread(() -> {
             while (!ShutdownCoordinator.isShuttingDown()) {
                 try { Thread.sleep(10000); } catch (InterruptedException e) { break; }
@@ -327,5 +407,6 @@ public class Main {
         }, "ResourceMonitor");
         t.setDaemon(true);
         t.start();
+        return t;
     }
 }

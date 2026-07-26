@@ -14,6 +14,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 public final class VerifierRuntimeSafetyTest {
     public static void main(String[] args) throws Exception {
         testCascadePolicyVariants();
+        testRunConfigurationPolicy();
+        testRunCountersAndTerminalOutcome();
         testVerifierCoreAndCliPolicyContract();
         testTerminationOutcomes();
         testInterruptRestoration();
@@ -35,6 +37,44 @@ public final class VerifierRuntimeSafetyTest {
         OperationalPolicy.enforceCascadeDeleteDisabled(config("THREAD_COUNT=1"));
         OperationalPolicy.enforceCascadeDeleteDisabled(config("CASCADE_DELETE_ON_MISSING=false"));
         OperationalPolicy.enforceCascadeDeleteDisabled(config("CASCADEDELETEONMISSING=off"));
+    }
+
+    private static void testRunConfigurationPolicy() throws Exception {
+        OperationalPolicy.validateRunConfiguration(config(
+                "SOURCE_SSID=CM\nDEST_SSID=CM"));
+        OperationalPolicy.validateRunConfiguration(config(
+                "SOURCE_SSID=SOURCE\nDEST_SSID=DEST"));
+        OperationalPolicy.validateRunConfiguration(config(
+                "SOURCE_SSID=SOURCE\nOPERATION_MODE=DELETE"));
+
+        expectReason(RunTerminationException.Reason.POLICY,
+                () -> OperationalPolicy.validateRunConfiguration(config("DEST_SSID=DEST")));
+        expectReason(RunTerminationException.Reason.POLICY,
+                () -> OperationalPolicy.validateRunConfiguration(config("SOURCE_SSID=SOURCE")));
+        expectReason(RunTerminationException.Reason.POLICY,
+                () -> OperationalPolicy.validateRunConfiguration(config(
+                        "SOURCE_SSID=SOURCE\nDEST_SSID=DEST\nMIGRATE_ITEMTYPES=")));
+    }
+
+    private static void testRunCountersAndTerminalOutcome() throws Exception {
+        Verifier.RunCounters first = new Verifier.RunCounters();
+        first.errors.incrementAndGet();
+        Verifier.RunCounters second = new Verifier.RunCounters();
+        assertEquals(0, second.errors.get(), "verifier counters must be run-local");
+
+        Verifier.requireCleanVerification(second);
+        expectReason(RunTerminationException.Reason.FAILED,
+                () -> Verifier.requireCleanVerification(first));
+
+        Verifier.RunCounters sourceMissing = new Verifier.RunCounters();
+        sourceMissing.sourceDeleted.incrementAndGet();
+        expectReason(RunTerminationException.Reason.FAILED,
+                () -> Verifier.requireCleanVerification(sourceMissing));
+
+        Verifier.RunCounters skipped = new Verifier.RunCounters();
+        skipped.skipped.incrementAndGet();
+        expectReason(RunTerminationException.Reason.FAILED,
+                () -> Verifier.requireCleanVerification(skipped));
     }
 
     private static void testVerifierCoreAndCliPolicyContract() throws Exception {
@@ -108,7 +148,10 @@ public final class VerifierRuntimeSafetyTest {
 
     private static Path writeConfig(String line) throws Exception {
         Path file = Files.createTempFile("cm-verifier-policy-", ".properties");
-        Files.writeString(file, line + "\nMIGRATE_ITEMTYPES=SOURCE:DEST\nTHREAD_COUNT=1\n");
+        String mapping = line.contains("MIGRATE_ITEMTYPES=")
+                ? ""
+                : "MIGRATE_ITEMTYPES=SOURCE:DEST\n";
+        Files.writeString(file, line + "\n" + mapping + "THREAD_COUNT=1\n");
         file.toFile().deleteOnExit();
         return file;
     }

@@ -32,14 +32,23 @@ web = Path("src/com/ibm/ecm/migration/WebServer.java").read_text()
 
 run = verifier[verifier.find("public static void run("):]
 policy = run.find("OperationalPolicy.enforceCascadeDeleteDisabled(config);")
+run_config = run.find("OperationalPolicy.validateRunConfiguration(config);")
 connect = run.find("new CMConnectionPool(config)")
 workers = run.find("new ThreadPoolExecutor(")
 journal_write = run.find("new VerificationLogger()")
 report = run.find("ReportDeliveryService.deliver(report")
-if min(policy, connect, workers, journal_write, report) < 0:
+if min(policy, run_config, connect, workers, journal_write, report) < 0:
     raise SystemExit("FAIL: could not locate verifier policy/callflow markers")
-if not policy < connect and policy < workers and policy < journal_write and policy < report:
-    raise SystemExit("FAIL: cascade policy must run before connect/workers/journal/report")
+if not policy < run_config < connect and run_config < workers and run_config < journal_write and run_config < report:
+    raise SystemExit("FAIL: run policies must execute before connect/workers/journal/report")
+
+main_run = main[main.find("public static void startMigration("):]
+main_policy = main_run.find("OperationalPolicy.validateRunConfiguration(config);")
+main_journal = main_run.find("new MigrationJournal(")
+if main_policy < 0 or main_journal < 0 or main_policy >= main_journal:
+    raise SystemExit("FAIL: migration run configuration must be validated before journal startup")
+if "POOL CONTAMINATION DETECTED" in Path("src/com/ibm/ecm/migration/ItemMigrator.java").read_text():
+    raise SystemExit("FAIL: equal SSIDs are supported and must not be logged as pool contamination")
 
 if "Verifier.main(new String[]{runConfigFile})" in web:
     raise SystemExit("FAIL: WebGUI must call the throwing Verifier core, never CLI main")

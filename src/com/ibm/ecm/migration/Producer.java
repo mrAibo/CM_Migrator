@@ -300,6 +300,27 @@ public class Producer implements Runnable {
                 strategy, sourceType, fetched, enqueued, skipped, avgFetch, queue.size());
     }
 
+    static long countCandidates(DKDatastoreICM ds, String query) throws Exception {
+        DKRetrieveOptionsICM options = DKRetrieveOptionsICM.createInstance(ds);
+        options.baseAttributes(false);
+        options.childListOneLevel(false);
+        options.partsList(false);
+        DKNVPair[] parameters = new DKNVPair[]{
+                new DKNVPair(DKConstant.DK_CM_PARM_MAX_RESULTS, "0"),
+                new DKNVPair(DKConstant.DK_CM_PARM_RETRIEVE, options),
+                new DKNVPair(DKConstant.DK_CM_PARM_END, null)
+        };
+        long count = 0;
+        dkResultSetCursor cursor = ds.execute(query, DKConstant.DK_CM_XQPE_QL_TYPE, parameters);
+        try {
+            while (cursor.fetchNext() != null) count++;
+        } finally {
+            cursor.close();
+            cursor.destroy();
+        }
+        return count;
+    }
+
     private String buildQuery(String sourceType) {
         return buildQuery(sourceType, config.getFilterPredicate());
     }

@@ -27,7 +27,9 @@ import java.io.InterruptedIOException;
 import java.lang.reflect.Method;
 import java.security.MessageDigest;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -39,6 +41,7 @@ public class ItemMigrator {
     private static final long SLOW_PART_WARN_MS = Long.getLong("cm.migrator.slowPartWarnMs", 30000L);
 
     private final CMConnectionPool pool;
+    private final Set<String> ignoredAttributes;
 
     private final ThreadLocal<Exception> lastError = new ThreadLocal<>();
 
@@ -62,7 +65,16 @@ public class ItemMigrator {
     }
 
     public ItemMigrator(CMConnectionPool pool) {
+        this(pool, Collections.emptySet());
+    }
+
+    ItemMigrator(CMConnectionPool pool, Set<String> ignoredAttributes) {
         this.pool = pool;
+        this.ignoredAttributes = Set.copyOf(ignoredAttributes);
+    }
+
+    static void clearRunCache() {
+        ATTR_CACHE.clear();
     }
 
     public Exception getLastError() {
@@ -181,12 +193,6 @@ public class ItemMigrator {
             long t1 = System.currentTimeMillis();
             DKDatastoreICM sourceDs = sourceConn.getDatastore();
 
-            String actualSourceSSID = sourceConn.getSSID();
-            String actualDestSSID = destConn.getSSID();
-            if (actualSourceSSID.equals(actualDestSSID)) {
-                logger.error("POOL CONTAMINATION DETECTED! Source and Dest have same SSID: {}", actualSourceSSID);
-            }
-            
             ThreadContext.put("sourcePid", pidString);
 
             sourceItem = sourceDs.createDDOFromPID(pidString);
@@ -395,29 +401,23 @@ public class ItemMigrator {
         }
     }
 
-    private static AttrInfo getAttrInfo(DKDDO dest, String destItemType, String name) {
+    private static AttrInfo getAttrInfo(DKDDO dest, String destItemType, String name) throws Exception {
         if (destItemType == null) destItemType = "<null>";
         ConcurrentHashMap<String, AttrInfo> byName = ATTR_CACHE.computeIfAbsent(destItemType, k -> new ConcurrentHashMap<>());
         AttrInfo cached = byName.get(name);
         if (cached != null) return cached;
 
-        try {
-            short destAttrId = dest.dataId(DKConstant.DK_CM_NAMESPACE_ATTR, name);
-            if (destAttrId <= 0) {
-                AttrInfo miss = new AttrInfo((short) -1, (short) -1);
-                byName.put(name, miss);
-                return miss;
-            }
-            Object typeObj = dest.getDataPropertyByName(destAttrId, "type");
-            short type = (typeObj instanceof Number) ? ((Number) typeObj).shortValue() : (short) -1;
-            AttrInfo info = new AttrInfo(destAttrId, type);
-            byName.put(name, info);
-            return info;
-        } catch (Exception e) {
+        short destAttrId = dest.dataId(DKConstant.DK_CM_NAMESPACE_ATTR, name);
+        if (destAttrId <= 0) {
             AttrInfo miss = new AttrInfo((short) -1, (short) -1);
             byName.put(name, miss);
             return miss;
         }
+        Object typeObj = dest.getDataPropertyByName(destAttrId, "type");
+        short type = (typeObj instanceof Number) ? ((Number) typeObj).shortValue() : (short) -1;
+        AttrInfo info = new AttrInfo(destAttrId, type);
+        byName.put(name, info);
+        return info;
     }
 
     private void copyAttributes(DKDDO source, DKDDO dest, String destItemType) throws Exception {
@@ -426,16 +426,21 @@ public class ItemMigrator {
             String name = source.getDataName(i);
             Object value = source.getData(i);
             if (name == null || name.startsWith("SYS") || name.equals(DKConstant.DK_CM_DKPARTS) || value instanceof DKChildCollection || value == null) continue;
+            if (ignoredAttributes.contains(name)) continue;
 
             AttrInfo info = getAttrInfo(dest, destItemType, name);
-            if (info.id <= 0) continue;
+            if (info.id <= 0) {
+                throw new PermanentMigrationException(
+                        "Destination attribute is missing: " + destItemType + "." + name);
+            }
 
             try {
                 setDestAttrTyped(dest, info.id, info.type, value);
                 successfulAttrCopies.incrementAndGet();
             } catch (Exception ex) {
                 failedAttrCopies.incrementAndGet();
-                logger.warn("Attribute copy failed: {} : {}", name, ex.getMessage());
+                throw new PermanentMigrationException(
+                        "Attribute copy failed: " + destItemType + "." + name, ex);
             }
         }
     }
@@ -491,15 +496,20 @@ public class ItemMigrator {
                 while (iter.more()) {
                     DKDDO sourceChild = (DKDDO) iter.next();
                     DKDDO destChild = dest.getDatastore().createDDO(sourceChild.getObjectType(), (short) DKConstant.DK_CM_ITEM);
-                    copyAttributes(sourceChild, destChild, destItemType);
-                    copyChildComponents(sourceChild, destChild, destItemType);
-                    try {
-                        short collId = dest.dataId(DKConstant.DK_CM_NAMESPACE_ATTR, childEntityName);
-                        if (collId > 0) {
-                            DKChildCollection destChildren = (DKChildCollection) dest.getData(collId);
-                            if (destChildren != null) destChildren.addElement(destChild);
-                        }
-                    } catch (Exception e) { logger.warn("Child add error: {}", e.getMessage()); }
+                    String childType = destItemType + "/" + childEntityName;
+                    copyAttributes(sourceChild, destChild, childType);
+                    copyChildComponents(sourceChild, destChild, childType);
+                    short collId = dest.dataId(DKConstant.DK_CM_NAMESPACE_ATTR, childEntityName);
+                    if (collId <= 0) {
+                        throw new PermanentMigrationException(
+                                "Destination child collection is missing: " + childEntityName);
+                    }
+                    Object destValue = dest.getData(collId);
+                    if (!(destValue instanceof DKChildCollection)) {
+                        throw new PermanentMigrationException(
+                                "Destination child collection is unavailable: " + childEntityName);
+                    }
+                    ((DKChildCollection) destValue).addElement(destChild);
                 }
             }
         }

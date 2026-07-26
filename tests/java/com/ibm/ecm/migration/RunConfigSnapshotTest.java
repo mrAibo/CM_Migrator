@@ -14,10 +14,16 @@ public final class RunConfigSnapshotTest {
         Path root = Files.createTempDirectory("cm-snapshot-test-");
         Path profileDir = root.resolve("conf/profiles");
         Files.createDirectories(profileDir);
+        Files.writeString(root.resolve("conf/migration.properties"),
+                "CONNECT_USER=wrong-default\n"
+                        + "PRODUCER_COUNT_STRATEGY=SDK_CURSOR\n"
+                        + "MIGRATE_ITEMTYPES=WRONG:WRONG\n");
         Path profile = profileDir.resolve("alternate.properties");
         Files.writeString(profile,
                 "CONNECT_USER=operator\n"
                         + "CONNECT_PASSWORD=" + SECRET + "\n"
+                        + "PROFILE=high-performance\n"
+                        + "PRODUCER_COUNT_STRATEGY=SINGLE_PASS\n"
                         + "MIGRATE_ITEMTYPES=SOURCE:DEST\n");
 
         Path runDir = root.resolve("data/webgui-runs");
@@ -32,6 +38,12 @@ public final class RunConfigSnapshotTest {
                 "effective credential must remain available to the run");
         assertEquals("VERIFY", copied.getProperty("OPERATION_MODE"),
                 "verification mode");
+        assertEquals("high-performance", copied.getProperty("PROFILE"),
+                "selected profile must remain complete");
+        assertEquals("SINGLE_PASS", copied.getProperty("PRODUCER_COUNT_STRATEGY"),
+                "selected strategy must not fall back to migration.properties");
+        assertEquals("SOURCE:DEST", copied.getProperty("MIGRATE_ITEMTYPES"),
+                "selected mapping must remain complete");
         assertFalse(copied.containsKey("WEBGUI_RUN_ID"),
                 "unused run metadata must not be copied");
         assertFalse(copied.containsKey("WEBGUI_SOURCE_CONFIG"),

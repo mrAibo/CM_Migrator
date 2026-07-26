@@ -11,14 +11,17 @@ public final class DeliveryResult {
     private final String transport;   // "mutt", "mailx", "none"
     private final String errorMessage; // null if ok
     private final String reportPath;   // absolute path to report.html
+    private final boolean localArtifactWritten; // report.html exists on disk
 
     public DeliveryResult(boolean sent, boolean attachmentsIncluded,
-                          String transport, String errorMessage, String reportPath) {
+                          String transport, String errorMessage, String reportPath,
+                          boolean localArtifactWritten) {
         this.sent = sent;
         this.attachmentsIncluded = attachmentsIncluded;
         this.transport = transport;
         this.errorMessage = errorMessage;
         this.reportPath = reportPath;
+        this.localArtifactWritten = localArtifactWritten;
     }
 
     public boolean sent()               { return sent; }
@@ -26,6 +29,7 @@ public final class DeliveryResult {
     public String transport()            { return transport; }
     public String errorMessage()         { return errorMessage; }
     public String reportPath()           { return reportPath; }
+    public boolean localArtifactWritten(){ return localArtifactWritten; }
 
     @Override
     public boolean equals(Object o) {
@@ -36,12 +40,13 @@ public final class DeliveryResult {
             && attachmentsIncluded == that.attachmentsIncluded
             && Objects.equals(transport, that.transport)
             && Objects.equals(errorMessage, that.errorMessage)
-            && Objects.equals(reportPath, that.reportPath);
+            && Objects.equals(reportPath, that.reportPath)
+            && localArtifactWritten == that.localArtifactWritten;
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(sent, attachmentsIncluded, transport, errorMessage, reportPath);
+        return Objects.hash(sent, attachmentsIncluded, transport, errorMessage, reportPath, localArtifactWritten);
     }
 
     @Override
@@ -50,6 +55,7 @@ public final class DeliveryResult {
             + ", attachmentsIncluded=" + attachmentsIncluded
             + ", transport=" + transport
             + ", errorMessage=" + errorMessage
+            + ", localArtifactWritten=" + localArtifactWritten
             + ", reportPath=" + reportPath + "]";
     }
 }

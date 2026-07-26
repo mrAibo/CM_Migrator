@@ -240,24 +240,50 @@ log "[5/6] Erstelle Release-Paket..."
 mkdir -p "$RELEASE_DIR"/{bin,lib,conf,webapp,data,reports}
 cp "$BUILD_JAR" "$RELEASE_DIR/bin/"
 
-for script in start.sh verify.sh monitor.sh webgui.sh remigrate.sh; do
+for script in start.sh verify.sh monitor.sh webgui.sh remigrate.sh compile.sh cm-run.sh cascade-delete-guard.sh; do
   if [[ -f "$PROJECT_DIR/bin/$script" ]]; then
     cp "$PROJECT_DIR/bin/$script" "$RELEASE_DIR/bin/"
     chmod +x "$RELEASE_DIR/bin/$script"
   fi
 done
 
-cp "$PROJECT_DIR/lib/"*.jar "$RELEASE_DIR/lib/" 2>/dev/null || true
-cp "$PROJECT_DIR/conf/migration.properties.example" "$RELEASE_DIR/conf/" 2>/dev/null || true
-cp "$PROJECT_DIR/conf/log4j2.xml" "$RELEASE_DIR/conf/" 2>/dev/null || true
+# NOTICE: No vendor JARs are packaged — partners must supply IBM CM SDK,
+# DB2 and Oracle JDBC drivers under their own license agreements.
+# Only the project-built JAR and H2 database JAR are included.
+cp "$PROJECT_DIR/lib/h2-"*.jar "$RELEASE_DIR/lib/" 2>/dev/null || true
+for conf in migration.properties.example ibmcmconfig.properties.example \
+            webgui.properties.example cmbcmenv.properties.example \
+            cmbicmsrvs.ini.example log4j2.xml log4j2-pretty.xml; do
+  cp "$PROJECT_DIR/conf/$conf" "$RELEASE_DIR/conf/" 2>/dev/null || true
+done
+for asset in webapp/index.html webapp/process.html; do
+  cp "$PROJECT_DIR/$asset" "$RELEASE_DIR/webapp/" 2>/dev/null || true
+done
 
 # README erstellen
 cat > "$RELEASE_DIR/README.txt" <<'EOF'
-IBM CM Migrator v2.2
-====================
+IBM CM Migrator — Partner Edition
+==================================
+This package does NOT include IBM CM SDK, DB2, or Oracle JDBC drivers.
+Partners must supply those JARs under their own license agreements.
+
 Schnellstart:
-1. cp conf/migration.properties.example conf/migration.properties
-2. ./bin/start.sh
+1. Place vendor JARs into lib/
+2. cp conf/migration.properties.example conf/migration.properties
+3. Configure source and destination CM connections
+4. ./bin/compile.sh
+5. ./bin/start.sh
+
+⚠️  OPERATION_MODE=DELETE with empty FILTER_PREDICATE deletes ALL
+   configured source ItemTypes. Always verify the predicate scope.
+
+Vendor dependencies (partner-supplied):
+- IBM CM API JARs (cmb81.jar, cmbicmsrv81.jar, cmbsdk81.jar, etc.)
+- DB2 JCC driver (db2jcc.jar, db2jcc_license_cu.jar)
+- Oracle JDBC driver (ojdbc8.jar or newer)
+
+Supported launchers: start.sh, verify.sh, monitor.sh, webgui.sh,
+remigrate.sh, compile.sh, cm-run.sh
 EOF
 
 # -----------------------------
