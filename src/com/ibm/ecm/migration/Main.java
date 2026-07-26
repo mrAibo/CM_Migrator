@@ -150,6 +150,7 @@ public class Main {
         WorkerTermination.Outcome termination = null;
         boolean aborted = false;
         boolean journalClosed = false;
+        boolean workersTerminated = false;
 
         // ─── Connection Pool ───
         try {
@@ -191,7 +192,7 @@ public class Main {
                     "Migration interrupted by operator request.", t, e);
         }
 
-        boolean workersTerminated = termination.terminated();
+        workersTerminated = termination.terminated();
         synchronized (current) { current.phase = OperatorConsole.Phase.DRAINING_WORKERS; }
         if (termination.timedOut()) {
             terminalOutcome = new RunTerminationException(
@@ -273,6 +274,16 @@ public class Main {
                                 result.reportPath(), result.sent(), result.transport());
                         if (result.errorMessage() != null) {
                             logger.error("Report delivery issue: {}", result.errorMessage());
+                            if (!result.localArtifactWritten()) {
+                                logger.error("Report artifact write failed — promotion to terminal outcome.");
+                                if (terminalOutcome == null) {
+                                    terminalOutcome = new RunTerminationException(
+                                            RunTerminationException.Reason.FAILED,
+                                            "Report artifact write failed: " + result.errorMessage(),
+                                            workersTerminated, null);
+                                    aborted = true;
+                                }
+                            }
                         }
                     } else {
                         logger.info("REPORT_ENABLED=false — skipping unified report generation.");
@@ -333,10 +344,18 @@ public class Main {
             }
         }
         } finally {
+            // Stop the console display even when migration fails early
             consoleThread.interrupt();
             try { consoleThread.join(1000); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
             OperatorConsole.finalRender(current);
             System.out.print(OperatorConsole.showCursor());
+
+            // Cleanup when pool/workers were never started (init failure)
+            if (!workersTerminated && !journalClosed) {
+                try { journal.close(); } catch (Exception ignored) {}
+                monitorThread.interrupt();
+                try { monitorThread.join(3000); } catch (InterruptedException ignored) {}
+            }
         }
 
         // ─── Console summary (after dashboard is done) ───

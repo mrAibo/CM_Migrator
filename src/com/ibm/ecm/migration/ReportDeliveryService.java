@@ -9,6 +9,10 @@ import java.io.PrintWriter;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -19,13 +23,14 @@ import org.apache.logging.log4j.Logger;
  */
 public class ReportDeliveryService {
     private static final Logger logger = LogManager.getLogger(ReportDeliveryService.class);
+    private static final long MAIL_TIMEOUT_SECONDS = 30;
 
     public static DeliveryResult deliver(UnifiedReport report, MigrationConfig config) {
         // 0. Check REPORT_ENABLED (issue 10)
         if ("false".equalsIgnoreCase(config.getProperty("REPORT_ENABLED", "true"))) {
             logger.info("REPORT_ENABLED=false — skipping report generation and email.");
             return new DeliveryResult(false, false, "none",
-                    "REPORT_ENABLED=false", null);
+                    "REPORT_ENABLED=false", null, false);
         }
 
         // 1. Determine output dir from config (issue 5)
@@ -49,9 +54,10 @@ public class ReportDeliveryService {
         } catch (Exception e) {
             logger.error("Failed to write report.html: {}", e.getMessage(), e);
             return new DeliveryResult(false, false, "none",
-                    "Failed to write report: " + e.getMessage(), reportPath);
+                    "Failed to write report: " + e.getMessage(), reportPath, false);
         }
         logger.info("Report written to {}", reportPath);
+        boolean localArtifactWritten = new File(reportPath).exists();
 
         // 3. Write the unified A4 audit protocol beside the report.
         String protocolPath = new File(dir, "pruefprotokoll.html").getAbsolutePath();
@@ -61,7 +67,7 @@ public class ReportDeliveryService {
         } catch (Exception e) {
             logger.error("Failed to write pruefprotokoll.html: {}", e.getMessage(), e);
             return new DeliveryResult(false, false, "none",
-                    "Failed to write audit protocol: " + e.getMessage(), reportPath);
+                    "Failed to write audit protocol: " + e.getMessage(), reportPath, false);
         }
         logger.info("Audit protocol written to {}", protocolPath);
 
@@ -104,7 +110,7 @@ public class ReportDeliveryService {
         if (emailTo == null || emailTo.trim().isEmpty()) {
             logger.info("No EMAIL_TO configured — skipping email delivery.");
             return new DeliveryResult(false, false, "none",
-                    "No EMAIL_TO configured", reportPath);  // issue 11: errorMessage not null
+                    "No EMAIL_TO configured", reportPath, localArtifactWritten);
         }
 
         emailTo = emailTo.trim();
@@ -146,7 +152,7 @@ public class ReportDeliveryService {
         if (transport == null) {
             logger.error("Neither mutt nor mailx found. Cannot send email.");
             return new DeliveryResult(false, false, "none",
-                    "No mail command found on system", reportPath);  // issue 11
+                    "No mail command found on system", reportPath, localArtifactWritten);
         }
 
         try {
@@ -161,11 +167,12 @@ public class ReportDeliveryService {
                 attIncluded = attachEnabled;
             }
             return new DeliveryResult(sent, attIncluded, transport,
-                    sent ? null : "Email send returned non-zero exit code", reportPath);
+                    sent ? null : "Email send returned non-zero exit code",
+                    reportPath, localArtifactWritten);
         } catch (Exception e) {
             logger.error("Email delivery failed: {}", e.getMessage(), e);
             return new DeliveryResult(false, false, transport,
-                    "Email delivery exception: " + e.getMessage(), reportPath);
+                    "Email delivery exception: " + e.getMessage(), reportPath, localArtifactWritten);
         }
     }
 
@@ -205,7 +212,25 @@ public class ReportDeliveryService {
             w.flush();
         }
 
-        int exit = p.waitFor();
+        // ponytail: bounded wait, concurrent stderr consumption
+        Future<Integer> future = Executors.newSingleThreadExecutor().submit(() -> {
+            // drain stderr while process runs, preventing pipe deadlock
+            try (java.io.InputStream stderr = p.getErrorStream()) {
+                byte[] buf = new byte[4096];
+                while (stderr.read(buf) != -1) {}
+            }
+            return p.waitFor();
+        });
+        int exit;
+        try {
+            exit = future.get(MAIL_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        } catch (TimeoutException e) {
+            p.destroyForcibly();
+            future.cancel(true);
+            logger.error("{} timed out after {}s — process forcibly destroyed",
+                    transport, MAIL_TIMEOUT_SECONDS);
+            return false;
+        }
         if (exit != 0) {
             StringBuilder err = new StringBuilder();
             try (BufferedReader r = new BufferedReader(
