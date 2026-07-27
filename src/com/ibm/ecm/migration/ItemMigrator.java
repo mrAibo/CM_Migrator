@@ -1023,7 +1023,19 @@ public class ItemMigrator {
                 }
 
                 itemDigest = fbScratch; // commit actual bytes read from source stream
-                destPart.setContentFromClientFile(tempFile.getAbsolutePath());
+                try {
+                    destPart.setContentFromClientFile(tempFile.getAbsolutePath());
+                } catch (Exception sdkEx) {
+                    if (requiresStreamUpload) {
+                        throw new PermanentMigrationException(
+                            "Part '" + originalName + "' (" + expectedSize
+                            + " bytes) exceeds the IBM CM SDK 2 GB limit for"
+                            + " setContentFromClientFile(). "
+                            + "This SDK version cannot migrate files larger than 2 GB."
+                            + " SDK error: " + sdkEx.getMessage());
+                    }
+                    throw sdkEx;
+                }
             }
 
             short destPartsId = dest.dataId(DKConstant.DK_CM_NAMESPACE_ATTR, DKConstant.DK_CM_DKPARTS);
