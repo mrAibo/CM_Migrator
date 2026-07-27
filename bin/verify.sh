@@ -107,6 +107,11 @@ fi
 echo "JVM Options: $JAVA_OPTS"
 echo "---------------------------------------------"
 
+# IBM SDK expects cmblogconfig.properties in the working directory,
+# -Dcm.home is not honoured by DKLog for this specific file.
+[ -f "$CONF_DIR/cmblogconfig.properties" ] && [ ! -f cmblogconfig.properties ] \
+    && cp "$CONF_DIR/cmblogconfig.properties" cmblogconfig.properties
+
 # 7. Execute
 "$JAVA_CMD" $JAVA_OPTS -Dcm.home="$CONF_DIR" -cp "$CP" com.ibm.ecm.migration.Verifier "$CONFIG_FILE"
 
