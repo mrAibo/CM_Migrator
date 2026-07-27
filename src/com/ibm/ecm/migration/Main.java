@@ -89,7 +89,7 @@ public class Main {
         current.state = OperatorConsole.RunState.RUNNING;
         current.phase = OperatorConsole.Phase.INITIALIZING;
         current.mode = config.getOperationMode();
-        current.strategy = config.getProducerCountStrategy();
+        current.strategy = "SDK_CURSOR"; // ponytail: single strategy
         current.sourceSSID = config.getSourceSSID();
         current.destSSID = config.getDestSSID();
 

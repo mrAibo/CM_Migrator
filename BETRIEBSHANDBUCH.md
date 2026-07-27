@@ -276,7 +276,6 @@ Für `PROFILE` selbst existiert kein Code-Default. Der Vorlagenwert ist keine au
 | `THREAD_COUNT` | nein | 5, Bereich 1–200 | Consumer-Anzahl | nach IBM-/DB-/Heap-Test dimensionieren |
 | `SOURCE_POOL_SIZE` | nein | `THREAD_COUNT + 1`, Bereich 1–500 | Source-Pool | im Delete-Pfad besonders relevant |
 | `DEST_POOL_SIZE` | nein | `THREAD_COUNT`, Bereich 1–500 | Destination-Pool | im Delete-Modus effektiv 0 |
-| `PRODUCER_COUNT_STRATEGY` | nein | `SINGLE_PASS` | `SINGLE_PASS` oder `SDK_CURSOR`; unbekannte Werte führen zu fail-fast | `SDK_CURSOR` führt zwei Cursor-Pässe aus (Zählen + Enqueue), `SINGLE_PASS` enqueued direkt |
 
 ### 6.6 Batch- und Queue-Verhalten
 
@@ -579,16 +578,13 @@ Nicht zuverlässig geprüft werden:
 
 Eingangsdaten sind `MIGRATE_ITEMTYPES` und ein optionales XQPE-`FILTER_PREDICATE`. `Producer` validiert ItemType-Namen und hängt das Prädikat an `/<SourceItemType>` an; absolute Filterpfade werden abgelehnt, damit sie den konfigurierten ItemType nicht ersetzen können.
 
-- `SINGLE_PASS` (Standard) entdeckt und enqueued in einem Cursor-Durchlauf.
-- `SDK_CURSOR` zählt in Pass 1 und enqueued in Pass 2.
+- Discovery erfolgt immer im Zwei-Pass-Verfahren: Zählen (Pass 1), Verarbeitung (Pass 2).
 
 `Producer` und Consumer teilen den `CMConnectionPool`. Consumer nehmen Batches, führen Migration oder Source Delete aus und schreiben `SUCCESS`, `FAILED`, `SKIPPED` beziehungsweise `DELETED` asynchron ins Journal. Erfolgreiche Migration speichert SHA-256 und Destination-ID.
 
-Bei normalem Producer-Ende wird je Consumer eine Poison Pill gesendet. Bei Shutdown oder Producer-/Discovery-Fehler werden keine normalen Poison Pills gesendet; Consumer verlassen den Loop über das globale Shutdown-Signal.
-
 Per-Item-Consumerfehler werden geloggt/journaled und können Retries auslösen. Bleiben Itemfehler übrig, wird der Report noch erzeugt, der Lauf endet danach aber mit `FAILED` und Nonzero-Exit. Unbehandelte Consumer- sowie Producer-/Discovery-Fehler werden zentral gespeichert, fordern Shutdown an und werden nach Cleanup weitergereicht.
 
-Parallelität wird über Threads, Queue, Batch und Pools begrenzt. `PRODUCER_COUNT_STRATEGY` steuert den Cursor-Modus: `SINGLE_PASS` (Standard) enqueued in einem Durchlauf, `SDK_CURSOR` führt zwei Pässe aus (Zählen + Enqueue). Unbekannte Werte führen zu fail-fast.
+Parallelität wird über Threads, Queue, Batch und Pools begrenzt.
 
 Der separate `com.example.migrator`-Prototyp besitzt mit `JdbcItemReader` eine andere, direkte DB2-Discovery. Sie ist nicht Teil von `cm-run.sh`, `bin/compile.sh`, der Safety-Härtungen oder der dokumentierten Tests und wird daher nicht als Alternative empfohlen.
 

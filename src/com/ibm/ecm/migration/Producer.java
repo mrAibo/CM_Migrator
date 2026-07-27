@@ -206,22 +206,8 @@ public class Producer implements Runnable {
                     new DKNVPair(DKConstant.DK_CM_PARM_END, null)
             };
 
-            String strategy = config.getProducerCountStrategy();
-            if (usesSinglePass(strategy)) {
-                processSinglePass(ds, query, sourceType, destType, isDeleteMode, options);
-            } else {
-                processTwoPass(ds, query, sourceType, destType, isDeleteMode, options);
-            }
-    }
-
-    static boolean usesSinglePass(String strategy) {
-        if ("SINGLE_PASS".equals(strategy)) return true;
-        if ("SDK_CURSOR".equals(strategy)) return false;
-        // ponytail: backward-compat — HYBRID and other legacy strategies
-        // behaved as SDK_CURSOR before v2.2.1 fail-closed hardening
-        logger.warn("Unknown PRODUCER_COUNT_STRATEGY '{}' — falling back to SDK_CURSOR. "
-                + "Update config to SDK_CURSOR or SINGLE_PASS.", strategy);
-        return false;
+            String strategy = "SDK_CURSOR"; // ponytail: single strategy, always two-pass
+            processTwoPass(ds, query, sourceType, destType, isDeleteMode, options);
     }
 
     private void processTwoPass(DKDatastoreICM ds, String query, String sourceType,
@@ -243,17 +229,11 @@ public class Producer implements Runnable {
         }
 
         processCursor(ds.execute(query, DKConstant.DK_CM_XQPE_QL_TYPE, options),
-                "SDK_CURSOR", sourceType, destType, isDeleteMode, false);
-    }
-
-    private void processSinglePass(DKDatastoreICM ds, String query, String sourceType,
-                                   String destType, boolean isDeleteMode, DKNVPair[] options) throws Exception {
-        processCursor(ds.execute(query, DKConstant.DK_CM_XQPE_QL_TYPE, options),
-                "SINGLE_PASS", sourceType, destType, isDeleteMode, true);
+                "SDK_CURSOR", sourceType, destType, isDeleteMode);
     }
 
     private void processCursor(dkResultSetCursor cursor, String strategy, String sourceType,
-                               String destType, boolean isDeleteMode, boolean setTotalAtEnd) throws Exception {
+                               String destType, boolean isDeleteMode) throws Exception {
         long fetched = 0;
         long enqueued = 0;
         long skipped = 0;
@@ -293,9 +273,8 @@ public class Producer implements Runnable {
             cursor.destroy();
         }
 
-        if (setTotalAtEnd && !ShutdownCoordinator.isShuttingDown()) {
-            stats.addTotalItems(fetched);
-        }
+        // ponytail: total set by count pass in processTwoPass, not here
+        // (fetched may differ from count when items are skipped)
 
         long duration = System.currentTimeMillis() - started;
         long avgFetch = fetched > 0 ? duration / fetched : 0;

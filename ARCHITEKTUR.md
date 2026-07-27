@@ -306,17 +306,15 @@ Hilfsmethoden: `awaitGrace()` für Shutdown-Request + Grace-Phase, `awaitGraceAf
 **Workflow:**
 1. Parallelisiert Discovery per ItemType (max. 10 Threads)
 2. Baut `/<SourceItemType>` plus optionales XQPE-Prädikat; absolute Filterpfade sind unzulässig
-3. `SINGLE_PASS`: entdeckt und enqueued direkt; `SDK_CURSOR`: zählt zuerst und enqueued im zweiten Pass
+3. Discovery erfolgt im Zwei-Pass-Verfahren: erst Zählen, dann Enqueue
 4. Überspringt bereits terminal journalisierte Items
 5. Sendet Poison-Pills zum Beenden der Consumer
 6. Bei Producer-/Discovery-Fehler: `WorkerFailureState.record()` + `ShutdownCoordinator.requestShutdown()`
 
 **v2.2.1:** Bei Shutdown oder Producer-Fehler werden **keine** normalen Poison-Pills gesendet; Consumer verlassen den Loop über das globale Shutdown-Signal.
 
-**Discovery-Strategien:**
-- `SINGLE_PASS` (Default): Ein Cursor-Durchlauf, direktes Enqueue
-- `SDK_CURSOR`: Zwei Cursor-Pässe (Zählen + Enqueue)
-- Unbekannte Werte führen zu fail-fast (`IllegalArgumentException`)
+**Discovery-Strategie:**
+- Immer Zwei-Pass-Verfahren: Zählen (Pass 1), Verarbeitung (Pass 2)
 
 ---
 

@@ -7,7 +7,7 @@ Restore and lock the Source Delete contract: purge all objects of explicitly con
 
 ### Decisions
 - Source Delete remains a standalone purge and is not restricted to migrated or verified journal rows.
-- `SINGLE_PASS` again performs one discovery cursor pass; `SDK_CURSOR` remains the explicit two-pass mode.
+- Discovery erfolgt ausschließlich im Zwei-Pass-Verfahren: Zählen (Pass 1), Verarbeitung (Pass 2).
 - `FILTER_PREDICATE` may only narrow the configured Source ItemType; absolute query paths fail closed.
 - Real deletes count as both successful and deleted; Dry-Run does not increment the deleted counter.
 - A `DELETED` journal update preserves existing destination PID and checksum; standalone deletes still create a journal row.

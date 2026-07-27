@@ -20,14 +20,7 @@ public final class ProducerDeleteScopeTest {
                         Producer.buildQuery("TYPE_A", "CREATETS > \"2026-01-01\"")));
         checkThrows("absolute query cannot escape configured item type",
                 () -> Producer.buildQuery("TYPE_A", "/TYPE_B"));
-        check("SINGLE_PASS selects streaming discovery",
-                Producer.usesSinglePass("SINGLE_PASS"));
-        check("SDK_CURSOR selects counted discovery",
-                !Producer.usesSinglePass("SDK_CURSOR"));
-        check("HYBRID legacy strategy falls back to SDK_CURSOR",
-                !Producer.usesSinglePass("HYBRID"));
-        check("unknown strategy falls back to SDK_CURSOR (backward-compat)",
-                !Producer.usesSinglePass("UNKNOWN"));
+        // ponytail: PRODUCER_COUNT_STRATEGY removed — always two-pass SDK_CURSOR
         testIgnoredAttributes();
         testRunCacheReset();
         OperationalPolicy.requireNoDeleteResiduals(Map.of("TYPE_A", 0L));
