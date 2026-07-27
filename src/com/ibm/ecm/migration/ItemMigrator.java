@@ -6,6 +6,7 @@
 package com.ibm.ecm.migration;
 
 import com.ibm.mm.sdk.common.DKConstant;
+import com.ibm.mm.sdk.common.DKConstantICM;
 import com.ibm.mm.sdk.common.DKDDO;
 import com.ibm.mm.sdk.common.DKChildCollection;
 import com.ibm.mm.sdk.common.DKLobICM;
@@ -182,6 +183,7 @@ public class ItemMigrator {
     private boolean migrateItemInternal(MigrationItem item, CMConnection sourceConn, CMConnection destConn) throws Exception {
         String pidString = item.getItemId();
         List<File> tempFiles = new ArrayList<>();
+        List<DeferredPartUpload> deferredUploads = new ArrayList<>();
         DKDDO sourceItem = null;
         DKDDO destItem = null;
 
@@ -221,7 +223,7 @@ public class ItemMigrator {
 
             copyAttributes(sourceItem, destItem, item.getDestItemType());
             copyChildComponents(sourceItem, destItem, item.getDestItemType());
-            copyParts(sourceItem, destItem, dkOpt, item, tempFiles);
+            copyParts(sourceItem, destItem, dkOpt, item, tempFiles, deferredUploads);
 
             tCopy = System.currentTimeMillis() - t2;
 
@@ -234,6 +236,11 @@ public class ItemMigrator {
             long t3 = System.currentTimeMillis();
             destItem.add();
             tAdd = System.currentTimeMillis() - t3;
+
+            // Verify all deferred setAddLocation streams consumed correctly
+            for (DeferredPartUpload upload : deferredUploads) {
+                upload.verifyComplete();
+            }
 
             if (tAdd >= SLOW_PHASE_WARN_MS) {
                 logger.warn("Slow add: itemId={} sourceType={} destType={} durationMs={}",
@@ -269,6 +276,9 @@ public class ItemMigrator {
 
             return true;
         } finally {
+            for (DeferredPartUpload upload : deferredUploads) {
+                upload.close();
+            }
             for (File f : tempFiles) safeDeleteTempFile(f);
             ThreadContext.remove("sourcePid");
             ThreadContext.remove("destPid");
@@ -522,6 +532,32 @@ public class ItemMigrator {
         public int read() throws java.io.IOException { int b = super.read(); if (b >= 0) { if (digest != null) digest.update((byte) b); count++; } return b; }
         public int read(byte[] b, int off, int len) throws java.io.IOException { int n = super.read(b, off, len); if (n > 0) { if (digest != null) digest.update(b, off, n); count += n; } return n; }
         long getCount() { return count; }
+    }
+
+    // ponytail: setAddLocation(STREAM, LENGTH) + destItem.add() is the
+    // correct IBM-documented path for document parts >2 GB. DKLobICM.add()
+    // is for standalone Resource Items and throws DGL7180A on parts.
+    private static final class DeferredPartUpload implements AutoCloseable {
+        final String partName;
+        final long expectedSize;
+        final CountingDigestInputStream stream;
+        DeferredPartUpload(String partName, long expectedSize, CountingDigestInputStream stream) {
+            this.partName = partName;
+            this.expectedSize = expectedSize;
+            this.stream = stream;
+        }
+        void verifyComplete() throws PermanentMigrationException {
+            long consumed = stream.getCount();
+            if (consumed != expectedSize) {
+                throw new PermanentMigrationException(
+                    "Deferred part upload incomplete for '" + partName
+                    + "': expected=" + expectedSize + " consumed=" + consumed);
+            }
+        }
+        @Override
+        public void close() {
+            try { stream.close(); } catch (Exception ignored) {}
+        }
     }
 
     // Round 13A: clone the running per-item digest before each upload attempt.
@@ -807,7 +843,8 @@ public class ItemMigrator {
         }
     }
 
-    private void copyParts(DKDDO source, DKDDO dest, DKRetrieveOptionsICM parentOpts, MigrationItem item, List<File> tempFiles) throws Exception {
+    private void copyParts(DKDDO source, DKDDO dest, DKRetrieveOptionsICM parentOpts, MigrationItem item,
+            List<File> tempFiles, List<DeferredPartUpload> deferredUploads) throws Exception {
         short partsId = source.dataId(DKConstant.DK_CM_NAMESPACE_ATTR, DKConstant.DK_CM_DKPARTS);
         if (partsId == 0) partsId = source.dataId(DKConstant.DK_CM_NAMESPACE_ATTR, "DKParts");
         if (partsId == 0) return;
@@ -926,8 +963,91 @@ public class ItemMigrator {
             boolean uploadedByStream = false;
             boolean requiresStreamUpload = (expectedSize > MAX_FILE_UPLOAD_SIZE);
             if (requiresStreamUpload) {
-                logger.info("Part '{}' exceeds 2GB limit ({} bytes), stream upload REQUIRED", originalName, expectedSize);
+                logger.info("Large part '{}' ({} bytes) — will use setAddLocation(STREAM, LENGTH)", originalName, expectedSize);
             }
+
+            // ponytail: for >2 GB, skip broken DirectAdd/StreamUpload attempts.
+            // Use IBM-documented setAddLocation(STREAM, LENGTH) + destItem.add().
+            // Tempfile spooling computes SHA-256 during write; stream is consumed
+            // later by IBM SDK inside destItem.add().
+            if (requiresStreamUpload) {
+                if (ShutdownCoordinator.isShuttingDown()) {
+                    throw new InterruptedException("Shutdown requested before large-part spool for item "
+                            + item.getItemId() + " part '" + originalName + "'");
+                }
+                String prefix = "mig_" + Integer.toHexString(item.getItemId().hashCode()) + "_";
+                File tempFile = createSizedTempFile(prefix, expectedSize);
+                tempFiles.add(tempFile);
+                try { ResourceGuardian.register(tempFile); } catch (Throwable t) {}
+
+                InputStream is = sourcePart.getContentInputStream(contentRetrieveOpts, 0L, -1L);
+                if (is == null) {
+                    DKRetrieveOptionsICM retryOpt = DKRetrieveOptionsICM.createInstance(sourceDs);
+                    retryOpt.resourceContent(true);
+                    is = sourcePart.getContentInputStream(retryOpt.dkNVPair(), 0L, -1L);
+                }
+                if (is == null) {
+                    String rmInfo = "";
+                    try { rmInfo = "RM_NAME=" + sourcePart.getRMName(); } catch(Exception e) {}
+                    throw new Exception("Source InputStream is null for part: " + originalName
+                            + ". [" + rmInfo + "]. Resource Manager offline or file missing?");
+                }
+
+                // Spool source → temp file, compute SHA-256 during write
+                MessageDigest fbScratch = cloneDigest(itemDigest);
+                long totalRead = 0;
+                try (OutputStream os = new FileOutputStream(tempFile, false)) {
+                    byte[] buf = new byte[65536];
+                    int n;
+                    while ((n = is.read(buf)) != -1) {
+                        if (ShutdownCoordinator.isShuttingDown()) {
+                            throw new InterruptedIOException("Shutdown during large-part spool for item "
+                                    + item.getItemId() + " part '" + originalName + "'");
+                        }
+                        os.write(buf, 0, n);
+                        fbScratch.update(buf, 0, n);
+                        totalRead += n;
+                    }
+                    os.flush();
+                } finally {
+                    try { is.close(); } catch (Exception e) {}
+                }
+
+                if (totalRead < expectedSize) {
+                    throw new PermanentMigrationException(
+                        "Partial source read for large part '" + originalName
+                        + "': expected=" + expectedSize + " read=" + totalRead);
+                }
+                if (totalRead > expectedSize) {
+                    logger.warn("Source size metadata differs: part='{}' expected={} actual={}",
+                            originalName, expectedSize, totalRead);
+                }
+
+                itemDigest = fbScratch;
+
+                // IBM-documented path: setAddLocation(STREAM, LENGTH).
+                // Stream is consumed by IBM SDK inside destItem.add() later.
+                InputStream fileStream = new java.io.BufferedInputStream(
+                        new java.io.FileInputStream(tempFile), 1048576);
+                CountingDigestInputStream counted = new CountingDigestInputStream(fileStream, null);
+
+                DKNVPair[] location = new DKNVPair[] {
+                    new DKNVPair(DKConstantICM.STREAM, counted),
+                    new DKNVPair(DKConstantICM.LENGTH, Long.valueOf(expectedSize))
+                };
+                destPart.setAddLocation(location);
+
+                deferredUploads.add(new DeferredPartUpload(originalName, expectedSize, counted));
+
+                short destPartsId = dest.dataId(DKConstant.DK_CM_NAMESPACE_ATTR, DKConstant.DK_CM_DKPARTS);
+                if (destPartsId == 0) destPartsId = dest.dataId(DKConstant.DK_CM_NAMESPACE_ATTR, "DKParts");
+                DKParts destParts = (DKParts) dest.getData(destPartsId);
+                if (destParts == null) { destParts = new DKParts(); dest.setData(destPartsId, destParts); }
+                destParts.addElement(destPart);
+                continue;
+            }
+
+            // --- below: normal path for files ≤ 2 GB ---
 
             // Round 13A: digest isolation per attempt — clone the running per-item
             // digest, give the clone to each attempt; commit only on a successful,
@@ -955,15 +1075,6 @@ public class ItemMigrator {
                     }
                     itemDigest = scratch; // commit
                 }
-            }
-
-            // Wenn Stream-Upload fehlschlägt und Datei > 2GB ist, versuche trotzdem
-            // tempfile + setContentFromClientFile(). Neuere IBM CM SDKs können
-            // >2GB-Dateien über diesen Pfad verarbeiten.
-            if (!uploadedByStream && requiresStreamUpload) {
-                logger.warn("Stream upload FAILED for large file '{}' ({} bytes)."
-                        + " Trying tempfile fallback — setContentFromClientFile() may"
-                        + " support large files on newer SDK versions.", originalName, expectedSize);
             }
 
             if (!uploadedByStream) {
@@ -1023,19 +1134,7 @@ public class ItemMigrator {
                 }
 
                 itemDigest = fbScratch; // commit actual bytes read from source stream
-                try {
-                    destPart.setContentFromClientFile(tempFile.getAbsolutePath());
-                } catch (Exception sdkEx) {
-                    if (requiresStreamUpload) {
-                        throw new PermanentMigrationException(
-                            "Part '" + originalName + "' (" + expectedSize
-                            + " bytes) exceeds the IBM CM SDK 2 GB limit for"
-                            + " setContentFromClientFile(). "
-                            + "This SDK version cannot migrate files larger than 2 GB."
-                            + " SDK error: " + sdkEx.getMessage());
-                    }
-                    throw sdkEx;
-                }
+                destPart.setContentFromClientFile(tempFile.getAbsolutePath());
             }
 
             short destPartsId = dest.dataId(DKConstant.DK_CM_NAMESPACE_ATTR, DKConstant.DK_CM_DKPARTS);
