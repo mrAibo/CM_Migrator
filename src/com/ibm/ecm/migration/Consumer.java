@@ -322,7 +322,10 @@ public class Consumer implements Runnable {
 
             if (!canRetry) {
                 stats.incrementFailed();
-                journal.logFailure(item.getItemId(), item.getSourceItemType(), "Failed in Single Item Fallback");
+                String reason = (last != null && last.getMessage() != null)
+                        ? last.getMessage()
+                        : "Failed in Single Item Fallback";
+                journal.logFailure(item.getItemId(), item.getSourceItemType(), reason);
                 return;
             }
 
