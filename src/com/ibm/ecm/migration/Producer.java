@@ -217,8 +217,11 @@ public class Producer implements Runnable {
     static boolean usesSinglePass(String strategy) {
         if ("SINGLE_PASS".equals(strategy)) return true;
         if ("SDK_CURSOR".equals(strategy)) return false;
-        throw new IllegalArgumentException("Unsupported PRODUCER_COUNT_STRATEGY: " + strategy
-                + ". Supported: SDK_CURSOR, SINGLE_PASS");
+        // ponytail: backward-compat — HYBRID and other legacy strategies
+        // behaved as SDK_CURSOR before v2.2.1 fail-closed hardening
+        logger.warn("Unknown PRODUCER_COUNT_STRATEGY '{}' — falling back to SDK_CURSOR. "
+                + "Update config to SDK_CURSOR or SINGLE_PASS.", strategy);
+        return false;
     }
 
     private void processTwoPass(DKDatastoreICM ds, String query, String sourceType,

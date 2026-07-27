@@ -24,8 +24,10 @@ public final class ProducerDeleteScopeTest {
                 Producer.usesSinglePass("SINGLE_PASS"));
         check("SDK_CURSOR selects counted discovery",
                 !Producer.usesSinglePass("SDK_CURSOR"));
-        checkThrows("unknown strategy fails closed",
-                () -> Producer.usesSinglePass("UNKNOWN"));
+        check("HYBRID legacy strategy falls back to SDK_CURSOR",
+                !Producer.usesSinglePass("HYBRID"));
+        check("unknown strategy falls back to SDK_CURSOR (backward-compat)",
+                !Producer.usesSinglePass("UNKNOWN"));
         testIgnoredAttributes();
         testRunCacheReset();
         OperationalPolicy.requireNoDeleteResiduals(Map.of("TYPE_A", 0L));

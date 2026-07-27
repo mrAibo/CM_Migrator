@@ -367,7 +367,14 @@ public class Main {
                 + " | Failed: " + stats.getFailedItems());
         System.out.println(ConsoleUI.separator());
 
-        if (terminalOutcome != null) throw terminalOutcome;
+        if (terminalOutcome != null) {
+            RuntimeException cause = terminalOutcome.getCause() instanceof RuntimeException
+                    ? (RuntimeException) terminalOutcome.getCause() : null;
+            System.err.println("FATAL: " + terminalOutcome.getMessage()
+                    + (cause != null ? " (cause: " + cause.getMessage() + ")" : ""));
+            System.err.println("Full details: migration.log");
+            throw terminalOutcome;
+        }
         workerFailureState.throwIfPresent("Migration worker failed");
     }
 
