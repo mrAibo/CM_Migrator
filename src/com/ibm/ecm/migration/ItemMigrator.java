@@ -957,14 +957,13 @@ public class ItemMigrator {
                 }
             }
 
-            // Wenn Stream-Upload fehlschlägt und Datei > 2GB ist, ist das ein fataler Fehler.
-            // Round 13A: classify as PermanentMigrationException so Consumer skips retries.
+            // Wenn Stream-Upload fehlschlägt und Datei > 2GB ist, versuche trotzdem
+            // tempfile + setContentFromClientFile(). Neuere IBM CM SDKs können
+            // >2GB-Dateien über diesen Pfad verarbeiten.
             if (!uploadedByStream && requiresStreamUpload) {
-                throw new PermanentMigrationException(
-                    "Stream upload FAILED for large file '" + originalName + "' (" + expectedSize +
-                    " bytes). File exceeds 2GB limit and setContentFromClientFile() cannot be used. " +
-                    "Hint: enable -Dcm.migrator.directAdd.enable=true ONLY if your RM permits, "
-                    + "or upgrade IBM CM SDK to a fixpack that exposes setContentFromClientStream(InputStream, long).");
+                logger.warn("Stream upload FAILED for large file '{}' ({} bytes)."
+                        + " Trying tempfile fallback — setContentFromClientFile() may"
+                        + " support large files on newer SDK versions.", originalName, expectedSize);
             }
 
             if (!uploadedByStream) {
