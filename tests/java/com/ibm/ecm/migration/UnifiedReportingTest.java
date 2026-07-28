@@ -3,6 +3,7 @@ package com.ibm.ecm.migration;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
+import java.sql.*;
 import java.util.*;
 
 /**
@@ -148,7 +149,7 @@ public final class UnifiedReportingTest {
     // B. Collector (ItemTypeResult factory methods)
     // ====================================================================
 
-    static void collectorTests() {
+    static void collectorTests() throws Exception {
         System.out.println("\n--- B. Collector / ItemTypeResult ---");
 
         // SingleItemType
@@ -186,13 +187,35 @@ public final class UnifiedReportingTest {
         check("withoutVerification: mismatches=-1", wv.mismatches() == -1, "got " + wv.mismatches());
         check("withoutVerification: error preserved",
             wv.errors().size() == 1, "got " + wv.errors().size());
+
+        Path dbBase = tempDir.resolve("stale-verification");
+        Files.createDirectories(dbBase);
+        try (Connection conn = DriverManager.getConnection(
+                "jdbc:h2:" + dbBase.resolve("journal_Document"), "sa", "");
+             Statement st = conn.createStatement()) {
+            st.execute("CREATE TABLE AUDIT_LOG (ITEM_ID VARCHAR(255) PRIMARY KEY, DEST_ITEM_ID VARCHAR(255), ITEM_TYPE VARCHAR(100), STATUS VARCHAR(20), CHECKSUM VARCHAR(64), MESSAGE VARCHAR(4000), MIGRATION_TIME TIMESTAMP)");
+            st.execute("CREATE TABLE VERIFICATION_LOG (ITEM_ID VARCHAR(255) PRIMARY KEY, STATUS VARCHAR(50), SOURCE_HASH VARCHAR(64), DEST_HASH VARCHAR(64), VERIFIED_AT TIMESTAMP, MESSAGE VARCHAR(1000))");
+            st.execute("INSERT INTO AUDIT_LOG VALUES ('current', 'dest-current', 'Document', 'SUCCESS', 'abc', NULL, CURRENT_TIMESTAMP)");
+            st.execute("INSERT INTO VERIFICATION_LOG VALUES ('stale', 'OK', 'abc', 'abc', CURRENT_TIMESTAMP, NULL)");
+            st.execute("INSERT INTO VERIFICATION_LOG VALUES ('current', 'OK', 'old', 'old', TIMESTAMP '2020-01-01 00:00:00', NULL)");
+        }
+        Path staleConfig = writeConfig(
+            "OPERATION_MODE=MIGRATE",
+            "MIGRATE_ITEMTYPES=Document:Document",
+            "DB_PATH=" + dbBase);
+        UnifiedReport staleReport = new ReportDataCollector(
+            new MigrationStats(), new MigrationConfig(staleConfig.toString())).collect();
+        check("Stale verification rows do not cover current migrations",
+            staleReport.itemTypes().get(0).verified() == -1
+                && !staleReport.hasCompleteVerificationResults(),
+            "stale verification row was counted as current evidence");
     }
 
     // ====================================================================
     // C. Operation ID format
     // ====================================================================
 
-    static void operationIdTests() {
+    static void operationIdTests() throws Exception {
         System.out.println("\n--- C. Operation ID ---");
 
         // Build a report with a known operationId
@@ -219,6 +242,19 @@ public final class UnifiedReportingTest {
         // Format patterns
         check("MIG prefix recognized", r.operationId().startsWith("MIG_"),
             "expected MIG_ prefix");
+
+        Path configPath = writeConfig(
+            "OPERATION_MODE=MIGRATE",
+            "SOURCE_SSID=SourceDB",
+            "DEST_SSID=DestDB",
+            "DB_PATH=" + tempDir.resolve("operation-id-data"));
+        UnifiedReport verifierReport = new ReportDataCollector(
+            new MigrationStats(), new MigrationConfig(configPath.toString()))
+            .collect(OperationType.VERIFICATION);
+        check("Verifier report overrides MIGRATE config operation",
+            verifierReport.operationType() == OperationType.VERIFICATION
+                && verifierReport.operationId().startsWith("VER_"),
+            "got " + verifierReport.operationType() + " / " + verifierReport.operationId());
     }
 
     // ====================================================================
@@ -272,9 +308,50 @@ public final class UnifiedReportingTest {
         check("Email contains decision and next action",
             email.contains("Prüfung erforderlich") && email.contains("Nächster Schritt"),
             "decision content missing");
+        check("Email keeps pending verification visible with technical deviations",
+            email.contains("Verifikation ausstehend"),
+            "pending verification was hidden by technical deviations");
+
+        UnifiedReport singleFailure = buildReport(OperationType.MIGRATION,
+            1, 0, 1, 0, 0, 0, 0, List.of(), List.of());
+        String singleFailureText = ReportRenderer.renderEmailBody(singleFailure)
+            + AuditProtocolGenerator.render(singleFailure);
+        check("Singular deviation wording is grammatical",
+            singleFailureText.contains("1 Abweichung") && !singleFailureText.contains("1 Abweichungen"),
+            "singular deviation used a plural noun");
         check("Email contains affected object",
             email.contains("12345"),
             "affected item missing");
+
+        // --- Outlook/plain fallback keeps semantic spaces and line breaks ---
+        String emailText = htmlTextFallback(email);
+        check("Email title has explicit line break without CSS",
+            emailText.contains("LAUF ABGESCHLOSSEN\nMigration mit Abweichungen abgeschlossen"),
+            "title words run together: " + emailText);
+        check("Email decision has explicit line break without CSS",
+            emailText.contains("Prüfung erforderlich\n3 Abweichungen"),
+            "decision words run together: " + emailText);
+        check("Email next action has explicit line break without CSS",
+            emailText.contains("Nächster Schritt\nBetroffene Objekte"),
+            "next-action words run together: " + emailText);
+        check("Email error cells allow long messages to wrap",
+            email.contains("overflow-wrap:anywhere"),
+            "long error wrapping style missing");
+
+        ReportError multilineError = new ReportError(
+            "Document", "multi-1", "FAILED",
+            "IBM Fehler" + (char) 13 + (char) 10 + "Ursache: Timeout" + (char) 10 + "Retry nötig",
+            "2026-07-28T10:00:00");
+        ItemTypeResult multilineType = ItemTypeResult.withoutVerification(
+            "Document", "Document", 1, 0, 1, 0, 0, List.of(multilineError));
+        UnifiedReport multilineReport = buildReport(OperationType.MIGRATION,
+            1, 0, 1, 0, 0, -1, -1, List.of(multilineType), List.of(multilineError));
+        String expectedMultiline = "IBM Fehler<br>Ursache: Timeout<br>Retry nötig";
+        check("Multiline errors preserve breaks in all artifacts",
+            ReportRenderer.renderFullReport(multilineReport).contains(expectedMultiline)
+                && ReportRenderer.renderEmailBody(multilineReport).contains(expectedMultiline)
+                && AuditProtocolGenerator.render(multilineReport).contains(expectedMultiline),
+            "multiline error was collapsed");
 
         // --- Subject line contains operation type and status ---
         check("Subject contains CM Migrator",
@@ -297,6 +374,9 @@ public final class UnifiedReportingTest {
         check("Protocol contains explicit verdict",
             protocol.contains("Bedingt freigegeben"),
             "verdict missing");
+        check("Protocol keeps errors visible while verification is pending",
+            protocol.contains("3 Fehler + Prüflauf"),
+            "combined open work was hidden");
         check("Protocol contains evidence chain",
             protocol.contains("Kontrolle") && protocol.contains("Nachweis")
                 && protocol.contains("Ergebnis") && protocol.contains("Offene Maßnahmen"),
@@ -308,6 +388,48 @@ public final class UnifiedReportingTest {
             !protocol.contains("fonts.googleapis.com")
                 && !protocol.contains("http://") && !protocol.contains("https://"),
             "external resource found");
+
+        ItemTypeResult pendingType = ItemTypeResult.withoutVerification(
+            "Document", "Document", 10, 10, 0, 0, 0, List.of());
+        UnifiedReport pendingVerification = buildReport(OperationType.MIGRATION,
+            10, 10, 0, 0, 0, -1, -1, List.of(pendingType), List.of());
+        String pendingHtml = ReportRenderer.renderFullReport(pendingVerification);
+        String pendingEmail = ReportRenderer.renderEmailBody(pendingVerification);
+        String pendingProtocol = AuditProtocolGenerator.render(pendingVerification);
+        check("Migration report marks verification as pending",
+            pendingHtml.contains("Verifikation ausstehend"),
+            "migration report says neither pending nor required");
+        check("Migration email marks verification as pending",
+            pendingEmail.contains("Verifikation ausstehend"),
+            "migration email hides pending verification");
+        check("Protocol does not approve an unverified migration",
+            pendingProtocol.contains("Verifikation ausstehend")
+                && !pendingProtocol.contains("<strong>Freigegeben</strong>"),
+            "unverified migration was approved");
+
+        ItemTypeResult partialType = new ItemTypeResult(
+            "Document", "Document", 10, 10, 0, 0, 0, 5, 0, 0, List.of());
+        UnifiedReport partialVerification = buildReport(OperationType.MIGRATION,
+            10, 10, 0, 0, 0, 0, 0, List.of(partialType), List.of());
+        String partialHtml = ReportRenderer.renderFullReport(partialVerification);
+        String partialProtocol = AuditProtocolGenerator.render(partialVerification);
+        check("Partial verification remains pending",
+            partialProtocol.contains("Verifikation ausstehend"),
+            "partial verification was treated as complete");
+        check("Partial verification shows current coverage",
+            partialHtml.contains("5 / 10 geprüft · ausstehend")
+                && partialProtocol.contains("5 / 10 geprüft · ausstehend")
+                && partialProtocol.contains("5 von 10 geprüft")
+                && partialProtocol.contains(">Ausstehend</td>"),
+            "partial verification coverage is ambiguous");
+
+        ItemTypeResult completeType = new ItemTypeResult(
+            "Document", "Document", 10, 10, 0, 0, 0, 10, 0, 0, List.of());
+        UnifiedReport completeVerification = buildReport(OperationType.MIGRATION,
+            10, 10, 0, 0, 0, 0, 0, List.of(completeType), List.of());
+        check("Complete verification permits approval",
+            AuditProtocolGenerator.render(completeVerification).contains("<strong>Freigegeben</strong>"),
+            "complete verification was not approved");
 
         // --- No file:// in any output ---
         check("HTML has no file://",
@@ -776,6 +898,16 @@ public final class UnifiedReportingTest {
     // ====================================================================
     // Report builder helpers
     // ====================================================================
+
+    // Simulates an HTML-capable mail client that drops CSS but keeps explicit <br>.
+    static String htmlTextFallback(String html) {
+        return html.replaceAll("(?i)<br\\s*/?>", "\n")
+            .replaceAll("(?i)</(td|tr|table|div|p|h[1-6])>", "\n")
+            .replaceAll("<[^>]+>", "")
+            .replace("&nbsp;", " ")
+            .replaceAll("[ \\t]+", " ")
+            .replaceAll(" *\\n *", "\n");
+    }
 
     /** Build a simple UnifiedReport without item-type detail. */
     static UnifiedReport buildReport(OperationType opType,

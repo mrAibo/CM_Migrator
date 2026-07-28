@@ -30,7 +30,7 @@ public final class AuditProtocolGenerator {
             + ".meta{display:grid;grid-template-columns:1fr 1fr;border:1px solid #d7dfe8;background:#f8fafc}\n"
             + ".meta div{padding:8px 10px;border-right:1px solid #d7dfe8;border-bottom:1px solid #d7dfe8}.meta div:nth-child(2n){border-right:0}\n"
             + ".meta b{display:block;margin-top:2px;font-size:8pt}\n"
-            + "table{width:100%;border-collapse:collapse;font-size:8pt}th{background:#142944;color:#fff;text-align:left;font-size:7pt;padding:7px}td{padding:7px;border-bottom:1px solid #dce3ea;vertical-align:top}\n"
+            + "table{width:100%;border-collapse:collapse;font-size:8pt}th{background:#142944;color:#fff;text-align:left;font-size:7pt;padding:7px}td{padding:7px;border-bottom:1px solid #dce3ea;vertical-align:top;overflow-wrap:anywhere;word-break:break-word}\n"
             + ".result{font-weight:700;color:#16794b;text-transform:uppercase}.result.review{color:#946117}\n"
             + ".mono{font-family:Consolas,'Courier New',monospace}\n"
             + ".approval{border-top:1px solid #8090a4;margin-top:20px;padding-top:10px}.approval-head{display:flex;justify-content:space-between;font-size:8pt;font-weight:700}\n"
@@ -44,16 +44,23 @@ public final class AuditProtocolGenerator {
     /** Render one complete, printable protocol for the delivered report. */
     public static String render(UnifiedReport r) {
         StringBuilder sb = new StringBuilder(8192);
-        String verdict = r.status() == OverallStatus.SUCCESS ? "Freigegeben" : "Bedingt freigegeben";
+        boolean hasVerification = r.hasVerificationResults();
+        boolean verificationPending = r.operationType() == OperationType.MIGRATION
+                && !r.hasCompleteVerificationResults();
+        String verdict = r.status() != OverallStatus.SUCCESS || r.failed() > 0
+                ? "Bedingt freigegeben"
+                : verificationPending ? "Verifikation ausstehend" : "Freigegeben";
         String generated = new SimpleDateFormat("dd.MM.yyyy HH:mm").format(new Date(r.endTimeMs()));
         long verified = 0;
         long mismatches = 0;
-        boolean hasVerification = false;
+        long orphaned = 0;
+        long expectedVerification = 0;
         for (ItemTypeResult it : r.itemTypes()) {
+            expectedVerification += Math.max(0, it.success());
             if (it.verified() >= 0) {
-                hasVerification = true;
                 verified += it.verified();
                 mismatches += Math.max(0, it.mismatches());
+                orphaned += Math.max(0, it.orphaned());
             }
         }
 
@@ -62,7 +69,8 @@ public final class AuditProtocolGenerator {
                 + "<title>CM Migrator Prüfprotokoll</title>").append(CSS)
                 .append("</head><body><main class=\"protocol\">");
 
-        sb.append("<header class=\"top\"><div><div class=\"eyebrow\">Revisionsnachweis · Migration &amp; Verifikation</div>"
+        sb.append("<header class=\"top\"><div><div class=\"eyebrow\">Revisionsnachweis · ")
+                .append(esc(operationLabel(r))).append("</div>"
                 + "<h1>Prüfprotokoll</h1><div class=\"sub\">")
                 .append(esc(operationLabel(r))).append(" · ")
                 .append(esc(r.sourceSSID())).append(" → ").append(esc(r.destSSID()))
@@ -70,14 +78,22 @@ public final class AuditProtocolGenerator {
                 .append(esc(r.operationId())).append("</b><br>Version ").append(VERSION)
                 .append("</div></header>");
 
+        String verdictDetail = r.failed() > 0
+                ? n(r.failed()) + (r.failed() == 1
+                    ? " technische Abweichung erfordert dokumentierte Nachbearbeitung."
+                    : " technische Abweichungen erfordern dokumentierte Nachbearbeitung.")
+                : verificationPending
+                    ? "Die Migration ist abgeschlossen; der separate Zielvergleich steht noch aus."
+                    : "Der Lauf wurde ohne offene technische Abweichungen abgeschlossen.";
+        String open = verificationPending
+                ? (r.failed() > 0 ? n(r.failed()) + " Fehler + Prüflauf" : "1 Prüflauf")
+                : n(r.failed());
         sb.append("<section class=\"verdict\"><div><small>Prüfergebnis</small><strong>")
-                .append(verdict).append("</strong><span>")
-                .append(r.failed() > 0
-                        ? n(r.failed()) + " technische Abweichungen erfordern dokumentierte Nachbearbeitung."
-                        : "Der Lauf wurde ohne offene technische Abweichungen abgeschlossen.")
+                .append(verdict).append("</strong><span>").append(verdictDetail)
                 .append("</span></div><div><small>Erfolgsquote</small><b class=\"ok\">")
                 .append(String.format("%.1f%%", r.successRate())).append("</b></div><div><small>Offen</small><b class=\"")
-                .append(r.failed() > 0 ? "bad" : "ok").append("\">").append(n(r.failed()))
+                .append(r.failed() > 0 || verificationPending ? "bad" : "ok").append("\">")
+                .append(open)
                 .append("</b></div></section>");
 
         sb.append("<section class=\"section\"><h2>Prüfumfang und Herkunft</h2><div class=\"meta\">")
@@ -98,8 +114,15 @@ public final class AuditProtocolGenerator {
                         n(r.failed()) + " Fehler protokolliert, kein stiller Verlust",
                         r.failed() == 0 ? "Bestanden" : "Nacharbeit", r.failed() > 0));
         if (hasVerification) {
-            sb.append(evidence("Integrität", n(verified) + " verifiziert, " + n(mismatches) + " Abweichungen",
-                    mismatches == 0 ? "Bestanden" : "Nacharbeit", mismatches > 0));
+            long checked = verified + mismatches + orphaned;
+            long anomalies = mismatches + orphaned;
+            String result = anomalies > 0 ? "Nacharbeit" : verificationPending ? "Ausstehend" : "Bestanden";
+            sb.append(evidence("Integrität",
+                    n(checked) + " von " + n(expectedVerification) + " geprüft, " + n(anomalies) + " Abweichungen",
+                    result, anomalies > 0 || verificationPending));
+        } else if (verificationPending) {
+            sb.append(evidence("Integrität", "Separater Vergleich der Zielinhalte noch nicht ausgeführt",
+                    "Ausstehend", true));
         }
         sb.append(evidence("Journalabschluss", "Bericht nach Abschluss der Verarbeitung erzeugt", "Bestanden", false))
                 .append("</tbody></table></section>");
@@ -110,27 +133,31 @@ public final class AuditProtocolGenerator {
             sb.append("<tr><td class=\"mono\">").append(esc(it.sourceType())).append(" → ")
                     .append(esc(it.destType())).append("</td><td>").append(n(it.success()))
                     .append(" / ").append(n(it.total())).append("</td><td>").append(n(Math.max(0, it.failed())))
-                    .append("</td><td>").append(it.verified() >= 0 ? n(it.verified()) : "Nicht ausgeführt")
+                    .append("</td><td>").append(ReportRenderer.verificationLabel(r, it))
                     .append("</td></tr>");
         }
         sb.append("</tbody></table></section>");
 
         sb.append("<section class=\"section\"><h2>Offene Maßnahmen</h2><table><thead><tr>"
                 + "<th>Objekt</th><th>Ursache</th><th>Maßnahme</th><th>Verantwortung</th></tr></thead><tbody>");
-        if (r.errors().isEmpty()) {
+        if (r.errors().isEmpty() && !verificationPending) {
             sb.append("<tr><td colspan=\"4\" class=\"ok\">Keine offenen Maßnahmen</td></tr>");
         } else {
             for (ReportError error : r.errors()) {
                 sb.append("<tr><td class=\"mono\">").append(esc(error.itemId())).append("</td><td>")
-                        .append(esc(error.message())).append("</td><td>Objekt prüfen und erneut migrieren</td>"
+                        .append(ReportRenderer.escLines(error.message())).append("</td><td>Objekt prüfen und erneut migrieren</td>"
                                 + "<td>Betrieb</td></tr>");
+            }
+            if (verificationPending) {
+                sb.append("<tr><td>Alle migrierten Objekte</td><td>Zielvergleich ausstehend</td>"
+                        + "<td>Separaten Verifikationslauf starten</td><td>Betrieb</td></tr>");
             }
         }
         sb.append("</tbody></table></section>");
 
         sb.append("<section class=\"approval\"><div class=\"approval-head\"><span>Freigabe nach Abschluss der Maßnahmen</span><span>Status: ")
-                .append(r.failed() > 0 ? "offen" : "bereit").append("</span></div>"
-                        + "<div class=\"signatures\"><div>Datum / Name</div><div>Unterschrift / Ticketreferenz</div></div></section>")
+                .append(r.failed() > 0 || verificationPending ? "offen" : "bereit").append("</span></div>")
+                .append("<div class=\"signatures\"><div>Datum / Name</div><div>Unterschrift / Ticketreferenz</div></div></section>")
                 .append("<footer class=\"footer\"><span>CM Migrator ").append(VERSION)
                 .append(" · Auditprotokoll</span><span>Seite 1 von 1 · ").append(esc(r.operationId()))
                 .append("</span></footer></main></body></html>");

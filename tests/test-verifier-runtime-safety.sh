@@ -39,6 +39,8 @@ journal_write = run.find("new VerificationLogger()")
 report = run.find("ReportDeliveryService.deliver(report")
 if min(policy, run_config, connect, workers, journal_write, report) < 0:
     raise SystemExit("FAIL: could not locate verifier policy/callflow markers")
+if "collector.collect(OperationType.VERIFICATION)" not in run:
+    raise SystemExit("FAIL: Verifier reports must use OperationType.VERIFICATION")
 if not policy < run_config < connect and run_config < workers and run_config < journal_write and run_config < report:
     raise SystemExit("FAIL: run policies must execute before connect/workers/journal/report")
 

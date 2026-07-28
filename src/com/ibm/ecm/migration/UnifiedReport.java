@@ -245,6 +245,27 @@ public final class UnifiedReport {
     public List<ItemTypeResult> itemTypes() { return itemTypes; }
     public List<ReportError> errors()      { return errors; }
 
+    public boolean hasVerificationResults() {
+        for (ItemTypeResult itemType : itemTypes) {
+            if (itemType.verified() >= 0) return true;
+        }
+        return false;
+    }
+
+    public boolean hasCompleteVerificationResults() {
+        if (itemTypes.isEmpty()) return success == 0;
+        for (ItemTypeResult itemType : itemTypes) {
+            if (itemType.success() < 0) return false;
+            if (itemType.success() == 0) continue;
+            if (itemType.verified() < 0) return false;
+            long checked = itemType.verified()
+                    + Math.max(0, itemType.mismatches())
+                    + Math.max(0, itemType.orphaned());
+            if (checked < itemType.success()) return false;
+        }
+        return true;
+    }
+
     /** Formatted duration string e.g. "2h 15m 30s". */
     public String formattedDuration() {
         long sec = (endTimeMs - startTimeMs) / 1000;

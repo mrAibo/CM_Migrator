@@ -40,6 +40,11 @@ public class ReportDataCollector {
 
     /** Read live stats + H2 journals once and return a complete UnifiedReport. */
     public UnifiedReport collect() {
+        return collect(OperationType.fromMode(config.getOperationMode()));
+    }
+
+    /** Same report data, with the operation that actually produced this report. */
+    public UnifiedReport collect(OperationType opType) {
         long endTimeMs = System.currentTimeMillis();
         long processed = stats.getProcessedItems();
         long durationMs = endTimeMs - stats.getStartTime();
@@ -49,8 +54,6 @@ public class ReportDataCollector {
         double successRate = processed > 0
             ? (double) stats.getSuccessItems() / processed * 100.0
             : 100.0;
-
-        OperationType opType = OperationType.fromMode(config.getOperationMode());
 
         List<ItemTypeResult> itemTypes = new ArrayList<>();
         List<ReportError>    allErrors = new ArrayList<>();
@@ -149,8 +152,13 @@ public class ReportDataCollector {
             long verified = -1, mismatches = -1, orphaned = -1;
             if (MigrationJournal.isTablePresent(conn, "VERIFICATION_LOG")) {
                 String verSql =
-                    "SELECT STATUS, COUNT(*) AS CNT FROM VERIFICATION_LOG GROUP BY STATUS";
+                    "SELECT v.STATUS, COUNT(*) AS CNT FROM VERIFICATION_LOG v" +
+                    " JOIN AUDIT_LOG a ON a.ITEM_ID = v.ITEM_ID" +
+                    " WHERE a.ITEM_TYPE = ? AND a.STATUS IN ('SUCCESS', 'MATCH')" +
+                    " AND v.VERIFIED_AT >= a.MIGRATION_TIME" +
+                    " GROUP BY v.STATUS";
                 try (PreparedStatement ps = conn.prepareStatement(verSql)) {
+                    ps.setString(1, sourceType);
                     try (ResultSet rs = ps.executeQuery()) {
                         long vTotal = 0;
                         verified = 0;
@@ -176,10 +184,14 @@ public class ReportDataCollector {
                 // -- verification error details (issue 3) -------------------
                 if (verified >= 0 && (mismatches > 0 || orphaned > 0)) {
                     String detailSql =
-                        "SELECT ITEM_ID, STATUS, MESSAGE, VERIFIED_AT FROM VERIFICATION_LOG" +
-                        " WHERE STATUS IN ('MISMATCH', 'ORPHANED')" +
-                        " ORDER BY VERIFIED_AT DESC LIMIT " + MAX_ERRORS_PER_TYPE;
+                        "SELECT v.ITEM_ID, v.STATUS, v.MESSAGE, v.VERIFIED_AT FROM VERIFICATION_LOG v" +
+                        " JOIN AUDIT_LOG a ON a.ITEM_ID = v.ITEM_ID" +
+                        " WHERE a.ITEM_TYPE = ? AND a.STATUS IN ('SUCCESS', 'MATCH')" +
+                        " AND v.VERIFIED_AT >= a.MIGRATION_TIME" +
+                        " AND v.STATUS IN ('MISMATCH', 'ORPHANED')" +
+                        " ORDER BY v.VERIFIED_AT DESC LIMIT " + MAX_ERRORS_PER_TYPE;
                     try (PreparedStatement ps = conn.prepareStatement(detailSql)) {
+                        ps.setString(1, sourceType);
                         try (ResultSet rs = ps.executeQuery()) {
                             while (rs.next()) {
                                 ReportError verErr = new ReportError(

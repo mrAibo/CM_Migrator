@@ -80,3 +80,39 @@ Pre-existing `README.md`, `assets/` and `sketches/` worktree changes were not mo
 
 ### Next action
 Review the scoped diff, then commit the operator-surface changes separately from the pre-existing README/design artifacts.
+
+## 2026-07-28 — E-Mail-Formatierung und wahrheitsgemäßer Verifikationsstatus
+
+### Task
+Fehlende Abstände/Zeilenumbrüche im HTML-E-Mail-Body beheben und verhindern, dass ein Migrationsprotokoll ohne vollständigen Zielvergleich als freigegeben erscheint.
+
+### Decisions
+- Der Migrationslauf berechnet und journalisiert den Source-SHA-256; der eigentliche Source-/Destination-Vergleich bleibt ein separater `Verifier`-Lauf.
+- `cm-run.sh safe` bleibt der automatische Ablauf Migration → Verifikation; der reine Modus `migration` führt keine Zielverifikation aus.
+- Eine Migration ist erst verifiziert, wenn aktuelle `OK + MISMATCH + ORPHANED`-Nachweise alle erfolgreichen Objekte pro ItemType abdecken; fremde, vor der letzten Migration entstandene oder partielle Verifikationszeilen reichen nicht.
+- Nach einer erneuten Migration nimmt der `Verifier` ein Objekt mit altem `OK` wieder in die Standard-Worklist auf; beim zeitstempellosen Legacy-Schema wird sicherheitshalber vollständig neu verifiziert.
+- Unvollständige Prüfung wird als `Verifikation ausstehend` mit offener Maßnahme dargestellt, niemals als vollständig `Freigegeben`.
+- E-Mail-Zeilenumbrüche verwenden explizite `<br>` statt CSS-only `display:block`; Zeilenumbrüche aus Journalmeldungen bleiben erhalten und lange IDs/Meldungen dürfen umbrechen.
+- Der Verifier erzwingt für seinen Bericht `OperationType.VERIFICATION`, unabhängig von `OPERATION_MODE=MIGRATE` in der Migrationskonfiguration.
+
+### Files changed
+- `src/com/ibm/ecm/migration/{ReportRenderer,AuditProtocolGenerator,UnifiedReport,ReportDataCollector,ReportDeliveryService,ReportGenerator,Verifier}.java`
+- `tests/java/com/ibm/ecm/migration/UnifiedReportingTest.java`
+- `tests/java/com/ibm/ecm/migration/VerifierRuntimeSafetyTest.java`
+- `tests/test-verifier-runtime-safety.sh`
+- `PROJECT_LOG.md`
+
+Die vorhandenen unversionierten Verzeichnisse `.hermes/`, `assets/` und `sketches/` wurden nicht verändert.
+
+### Verification
+- `bash bin/compile.sh`: PASS, 109 Klassen und `bin/cm-migrator.jar` erzeugt.
+- `bash tests/test-unified-reporting.sh`: PASS, 118 Prüfungen.
+- Vollständige lokale Testmatrix: PASS, alle 19 `tests/test-*.sh`-Skripte.
+- Reale Browserdarstellung von E-Mail und A4-Prüfprotokoll: keine verklebten Wörter, abgeschnittenen Inhalte oder nicht umbrechenden langen IDs/Meldungen.
+- `git diff --check`: PASS.
+
+### Open issues
+- Kein echter Versand an Outlook/mailx und kein IBM-CM-Live-Verifikationslauf in dieser Umgebung.
+
+### Next action
+Branch reviewen und nach Freigabe mergen; anschließend `cm-run.sh safe` mit dem echten Profil ausführen und beide E-Mails/Artefakte kontrollieren.

@@ -34,7 +34,7 @@ public class ReportGenerator {
         logger.warn("ReportGenerator.generateVerificationReport() is deprecated — delegating to unified pipeline.");
         try {
             ReportDataCollector collector = new ReportDataCollector(stats, config);
-            UnifiedReport report = collector.collect();
+            UnifiedReport report = collector.collect(OperationType.VERIFICATION);
             ReportDeliveryService.deliver(report, config);
         } catch (Exception e) {
             logger.error("Delegation failed: {}", e.getMessage(), e);
