@@ -419,7 +419,7 @@ public class Verifier {
 
             try {
                 ReportDataCollector collector = new ReportDataCollector(stats, config);
-                UnifiedReport report = collector.collect();
+                UnifiedReport report = collector.collect(OperationType.VERIFICATION);
                 ReportDeliveryService.deliver(report, config);
             } catch (Exception e) {
                 logger.error("Verification report delivery failed: {}", e.getMessage(), e);
@@ -533,30 +533,24 @@ public class Verifier {
         if (isNonOkWorklistMode()) {
             return buildNonOkWorklistSql(jSchema, vSchema);
         }
-        // Default: Items mit AUDIT_LOG.STATUS='SUCCESS' minus bereits OK-verifizierte.
-        // LEFT JOIN statt In-Memory-Cache, um Speicher zu schonen.
+        // Default: current AUDIT_LOG successes minus an OK from this migration revision.
+        // The legacy AUDITLOG schema has no migration timestamp; fail open there and reverify all
+        // successes rather than allowing a stale OK to suppress destination comparison.
         if (jSchema == JournalSchema.NEW_AUDITLOG) {
-            if (vSchema == VerifySchema.NEW_VERIFICATIONLOG) {
-                return "SELECT a.ITEMID, a.DESTITEMID, a.CHECKSUM " +
-                       "FROM AUDITLOG a " +
-                       "LEFT JOIN VERIFICATIONLOG v ON a.ITEMID = v.ITEMID AND v.STATUS = 'OK' " +
-                       "WHERE a.STATUS = 'SUCCESS' AND v.ITEMID IS NULL";
-            } else {
-                return "SELECT a.ITEMID, a.DESTITEMID, a.CHECKSUM " +
-                       "FROM AUDITLOG a " +
-                       "LEFT JOIN VERIFICATION_LOG v ON a.ITEMID = v.ITEM_ID AND v.STATUS = 'OK' " +
-                       "WHERE a.STATUS = 'SUCCESS' AND v.ITEM_ID IS NULL";
-            }
+            return "SELECT a.ITEMID, a.DESTITEMID, a.CHECKSUM " +
+                   "FROM AUDITLOG a WHERE a.STATUS = 'SUCCESS'";
         } else {
             if (vSchema == VerifySchema.NEW_VERIFICATIONLOG) {
                 return "SELECT a.ITEM_ID, a.DEST_ITEM_ID, a.CHECKSUM " +
                        "FROM AUDIT_LOG a " +
                        "LEFT JOIN VERIFICATIONLOG v ON a.ITEM_ID = v.ITEMID AND v.STATUS = 'OK' " +
+                       "AND v.VERIFICATIONTIME >= a.MIGRATION_TIME " +
                        "WHERE a.STATUS = 'SUCCESS' AND v.ITEMID IS NULL";
             } else {
                 return "SELECT a.ITEM_ID, a.DEST_ITEM_ID, a.CHECKSUM " +
                        "FROM AUDIT_LOG a " +
                        "LEFT JOIN VERIFICATION_LOG v ON a.ITEM_ID = v.ITEM_ID AND v.STATUS = 'OK' " +
+                       "AND v.VERIFIED_AT >= a.MIGRATION_TIME " +
                        "WHERE a.STATUS = 'SUCCESS' AND v.ITEM_ID IS NULL";
             }
         }

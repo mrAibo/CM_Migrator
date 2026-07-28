@@ -9,6 +9,7 @@ import java.io.PrintWriter;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
@@ -206,43 +207,57 @@ public class ReportDeliveryService {
         pb.redirectInput(ProcessBuilder.Redirect.PIPE);
         Process p = pb.start();
 
-        try (OutputStreamWriter w = new OutputStreamWriter(
-                p.getOutputStream(), StandardCharsets.UTF_8)) {
-            w.write(htmlBody);
-            w.flush();
-        }
-
-        // ponytail: bounded wait, concurrent stderr consumption
-        Future<Integer> future = Executors.newSingleThreadExecutor().submit(() -> {
-            // drain stderr while process runs, preventing pipe deadlock
-            try (java.io.InputStream stderr = p.getErrorStream()) {
-                byte[] buf = new byte[4096];
-                while (stderr.read(buf) != -1) {}
-            }
-            return p.waitFor();
-        });
-        int exit;
-        try {
-            exit = future.get(MAIL_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-        } catch (TimeoutException e) {
-            p.destroyForcibly();
-            future.cancel(true);
-            logger.error("{} timed out after {}s — process forcibly destroyed",
-                    transport, MAIL_TIMEOUT_SECONDS);
-            return false;
-        }
-        if (exit != 0) {
-            StringBuilder err = new StringBuilder();
+        // ponytail: drain stderr before writing stdin, otherwise full pipes can deadlock each other.
+        StringBuilder err = new StringBuilder();
+        ExecutorService mailExecutor = Executors.newSingleThreadExecutor();
+        Future<?> stderrFuture = mailExecutor.submit(() -> {
             try (BufferedReader r = new BufferedReader(
-                    new InputStreamReader(p.getErrorStream()))) {
+                    new InputStreamReader(p.getErrorStream(), StandardCharsets.UTF_8))) {
                 String line;
-                while ((line = r.readLine()) != null) err.append(line).append("\n");
+                while ((line = r.readLine()) != null) err.append(line).append('\n');
             }
-            logger.error("{} exited with {} — {}", transport, exit, err.toString().trim());
+            return null;
+        });
+
+        try {
+            try (OutputStreamWriter w = new OutputStreamWriter(
+                    p.getOutputStream(), StandardCharsets.UTF_8)) {
+                w.write(htmlBody);
+                w.flush();
+            }
+
+            if (!p.waitFor(MAIL_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                p.destroyForcibly();
+                stderrFuture.cancel(true);
+                logger.error("{} timed out after {}s — process forcibly destroyed",
+                        transport, MAIL_TIMEOUT_SECONDS);
+                return false;
+            }
+
+            try {
+                stderrFuture.get(1, TimeUnit.SECONDS);
+            } catch (TimeoutException e) {
+                stderrFuture.cancel(true);
+                logger.warn("{} stderr drain did not finish after process exit", transport);
+            }
+
+            int exit = p.exitValue();
+            if (exit != 0) {
+                logger.error("{} exited with {} — {}", transport, exit, err.toString().trim());
+                return false;
+            }
+            logger.info("Email sent via {} to {}", transport, to);
+            return true;
+        } catch (InterruptedException e) {
+            p.destroyForcibly();
+            stderrFuture.cancel(true);
+            Thread.currentThread().interrupt();
+            logger.error("{} interrupted — process forcibly destroyed", transport);
             return false;
+        } finally {
+            if (p.isAlive()) p.destroyForcibly();
+            mailExecutor.shutdownNow();
         }
-        logger.info("Email sent via {} to {}", transport, to);
-        return true;
     }
 
     // ponytail: test-only override via static field (package-private).

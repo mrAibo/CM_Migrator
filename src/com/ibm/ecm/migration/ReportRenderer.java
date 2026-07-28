@@ -18,7 +18,7 @@ public final class ReportRenderer {
             + ".meta{display:grid;grid-template-columns:2fr repeat(3,1fr);border-bottom:1px solid #d7dfe8}.meta div{padding:12px 16px;border-right:1px solid #d7dfe8}.meta div:last-child{border-right:0}.meta small,.summary small{display:block;color:#758398;font-size:.65rem;text-transform:uppercase;letter-spacing:.08em}.meta b{font-size:.8rem}\n"
             + ".body{padding:22px 30px}.priority{display:grid;grid-template-columns:1fr 1.4fr;gap:14px;margin-bottom:24px}.summary{padding:17px;border:1px solid #d4dde7}.summary.alert{background:#fdf0f0;border:0;border-left:4px solid #b93838}.summary strong{display:block;font-size:1.55rem;margin:5px 0}.summary.alert strong{color:#b93838}.progress{height:5px;background:#e1e7ee;margin-top:10px}.progress span{display:block;height:100%;background:#16794b}\n"
             + ".section{margin:0 0 24px}.section-title{display:flex;justify-content:space-between;align-items:end;border-bottom:2px solid #d4dde7;padding-bottom:6px;margin-bottom:8px}.section-title h2{font-size:1rem;margin:0}.section-title span{font-size:.68rem;color:#768497}\n"
-            + "table{width:100%;border-collapse:collapse;font-size:.78rem}th{padding:8px 10px;text-align:left;background:#eaf0f5;color:#617085;font-size:.64rem;text-transform:uppercase;letter-spacing:.06em}td{padding:9px 10px;border-bottom:1px solid #dde4ec;vertical-align:top}.mono{font-family:Consolas,'Courier New',monospace}.bad{color:#b93838;font-weight:700}.ok{color:#16794b;font-weight:700}.muted{color:#8290a1}.severity{display:inline-block;background:#fbe5e5;color:#b93838;padding:2px 6px;font-size:.62rem;font-weight:800}\n"
+            + "table{width:100%;border-collapse:collapse;font-size:.78rem}th{padding:8px 10px;text-align:left;background:#eaf0f5;color:#617085;font-size:.64rem;text-transform:uppercase;letter-spacing:.06em}td{padding:9px 10px;border-bottom:1px solid #dde4ec;vertical-align:top;overflow-wrap:anywhere;word-break:break-word}.mono{font-family:Consolas,'Courier New',monospace}.bad{color:#b93838;font-weight:700}.ok{color:#16794b;font-weight:700}.muted{color:#8290a1}.severity{display:inline-block;background:#fbe5e5;color:#b93838;padding:2px 6px;font-size:.62rem;font-weight:800}\n"
             + ".kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:#d7dfe8;margin-bottom:24px}.kpi{background:#f8fafc;padding:13px;text-align:center}.kpi b{display:block;font-size:1.05rem}.kpi small{color:#758398;font-size:.6rem;text-transform:uppercase}\n"
             + ".footer{display:flex;justify-content:space-between;background:#f6f8fa;border-top:1px solid #d7dfe8;padding:10px 30px;color:#7b8898;font-size:.65rem}\n"
             + "@media(max-width:720px){body{padding:0}.mast,.priority{display:block}.decision{margin-top:14px}.meta{grid-template-columns:1fr 1fr}.kpis{grid-template-columns:1fr 1fr}.body{padding:18px}.table-wrap{overflow-x:auto}}\n"
@@ -40,7 +40,7 @@ public final class ReportRenderer {
         sb.append("<div class=\"body\">");
         renderPriority(sb, r);
         if (!errors.isEmpty()) renderErrorTable(sb, errors);
-        renderItemTypes(sb, r.itemTypes());
+        renderItemTypes(sb, r);
         renderKpis(sb, r);
         sb.append("</div><footer class=\"footer\"><span>CM Migrator ").append(VERSION)
                 .append(" · Abschlussbericht</span><span>").append(esc(r.operationId()))
@@ -51,7 +51,9 @@ public final class ReportRenderer {
     /** Compact, table-based HTML for Outlook and mailx. */
     public static String renderEmailBody(UnifiedReport r) {
         List<ReportError> errors = collectAllErrors(r);
-        boolean review = needsReview(r);
+        boolean technicalReview = hasTechnicalReview(r);
+        boolean verificationPending = verificationPending(r);
+        boolean review = technicalReview || verificationPending;
         StringBuilder sb = new StringBuilder(8192);
         sb.append("<!DOCTYPE html><html lang=\"de\"><head><meta charset=\"UTF-8\"></head>"
                 + "<body style=\"margin:0;padding:0;background:#f2f5f8;font-family:Arial,Helvetica,sans-serif;color:#1c2b40\">"
@@ -60,21 +62,23 @@ public final class ReportRenderer {
 
         sb.append("<tr><td style=\"background:#142944;padding:20px 24px;color:#fff\">"
                 + "<table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\"><tr><td>"
-                + "<span style=\"display:block;color:#b8c5d5;font-size:10px;letter-spacing:1px\">CM MIGRATOR · LAUF ABGESCHLOSSEN</span>"
-                + "<span style=\"display:block;font-size:20px;font-weight:bold;margin-top:5px\">")
-                .append(esc(resultTitle(r))).append("</span><span style=\"display:block;color:#aebdd0;font-size:11px;margin-top:4px\">")
+                + "<span style=\"color:#b8c5d5;font-size:10px;letter-spacing:1px\">CM MIGRATOR · LAUF ABGESCHLOSSEN</span><br>"
+                + "<span style=\"font-size:20px;font-weight:bold;line-height:1.5\">")
+                .append(esc(resultTitle(r))).append("</span><br><span style=\"color:#aebdd0;font-size:11px;line-height:1.5\">")
                 .append(esc(r.sourceSSID())).append(" → ").append(esc(r.destSSID())).append(" · ")
                 .append(esc(r.operationId())).append("</span></td></tr></table></td></tr>");
 
+        String decision = technicalReview ? "Prüfung erforderlich"
+                : verificationPending ? "Verifikation ausstehend" : "Freigabebereit";
+        String detail = technicalReview ? deviationCount(r.failed()) + " vor Freigabe bearbeiten."
+                    + (verificationPending ? " Verifikation ausstehend." : "")
+                : verificationPending ? "Separater Zielvergleich ist noch erforderlich."
+                : "Keine offenen technischen Abweichungen.";
         sb.append("<tr><td style=\"padding:14px 24px;background:")
                 .append(review ? "#fff5e8;border-left:4px solid #e76617;color:#78460f" : "#edf9f2;border-left:4px solid #16794b;color:#155f3c")
-                .append("\"><span style=\"display:block;font-size:16px;font-weight:bold\">")
-                .append(review ? "Prüfung erforderlich" : "Freigabebereit")
-                .append("</span><span style=\"font-size:11px\">")
-                .append(review
-                        ? n(r.failed()) + " Abweichungen vor Freigabe bearbeiten."
-                        : "Keine offenen technischen Abweichungen.")
-                .append("</span></td></tr>");
+                .append("\"><span style=\"font-size:16px;font-weight:bold\">")
+                .append(decision).append("</span><br><span style=\"font-size:11px\">")
+                .append(detail).append("</span></td></tr>");
 
         sb.append("<tr><td style=\"padding:18px 24px\"><table width=\"100%\" cellpadding=\"0\" cellspacing=\"8\"><tr>")
                 .append(mailKpi(n(r.total()), "TOTAL", "#1c2b40"))
@@ -84,21 +88,25 @@ public final class ReportRenderer {
                 .append("</tr></table></td></tr>");
 
         if (review) {
+            String nextStep = technicalReview && verificationPending
+                    ? "Betroffene Objekte im Zielsystem prüfen, Einzel-Retry ausführen, danach Verifikation starten und das Prüfprotokoll erst nach erfolgreichem Zielvergleich freigeben."
+                    : technicalReview
+                    ? "Betroffene Objekte im Zielsystem prüfen, anschließend Einzel-Retry ausführen und das Prüfprotokoll freigeben."
+                    : "Verifikation starten und das Prüfprotokoll erst nach erfolgreichem Zielvergleich freigeben.";
             sb.append("<tr><td style=\"padding:0 24px 14px\"><table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background:#fff8ed;border:1px solid #ead5b4\"><tr><td style=\"padding:11px 13px;color:#704b17;font-size:11px\">"
-                    + "<b style=\"display:block;color:#4e3210;margin-bottom:4px\">Nächster Schritt</b>"
-                    + "Betroffene Objekte im Zielsystem prüfen, anschließend Einzel-Retry ausführen und das Prüfprotokoll freigeben."
-                    + "</td></tr></table></td></tr>");
+                    + "<b style=\"color:#4e3210\">Nächster Schritt</b><br>")
+                    .append(nextStep).append("</td></tr></table></td></tr>");
         }
 
         if (!errors.isEmpty()) {
-            sb.append("<tr><td style=\"padding:4px 24px 16px\"><span style=\"font-size:11px;font-weight:bold;color:#263950\">OFFENE ABWEICHUNGEN</span>"
+            sb.append("<tr><td style=\"padding:4px 24px 16px\"><span style=\"font-size:11px;font-weight:bold;color:#263950\">OFFENE ABWEICHUNGEN</span><br>"
                     + "<table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"margin-top:6px\">");
             int max = Math.min(errors.size(), 5);
             for (int i = 0; i < max; i++) {
                 ReportError error = errors.get(i);
-                sb.append("<tr><td style=\"padding:8px 0;border-bottom:1px solid #e1e7ee;font-size:11px\"><b style=\"color:#253950\">")
+                sb.append("<tr><td style=\"padding:8px 0;border-bottom:1px solid #e1e7ee;font-size:11px;overflow-wrap:anywhere;word-break:break-word\"><b style=\"color:#253950\">")
                         .append(esc(error.itemType())).append(" / ").append(esc(error.itemId()))
-                        .append("</b><br><span style=\"color:#6d7b8c\">").append(esc(trunc(error.message(), 100)))
+                        .append("</b><br><span style=\"color:#6d7b8c\">").append(escLines(trunc(error.message(), 100)))
                         .append(" · Objekt prüfen und erneut migrieren</span></td></tr>");
             }
             if (errors.size() > max) {
@@ -108,7 +116,7 @@ public final class ReportRenderer {
             sb.append("</table></td></tr>");
         }
 
-        sb.append("<tr><td style=\"padding:4px 24px 18px\"><span style=\"font-size:11px;font-weight:bold;color:#263950\">ERGEBNIS NACH ITEMTYPE</span>"
+        sb.append("<tr><td style=\"padding:4px 24px 18px\"><span style=\"font-size:11px;font-weight:bold;color:#263950\">ERGEBNIS NACH ITEMTYPE</span><br>"
                 + "<table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"margin-top:6px\">");
         for (ItemTypeResult it : r.itemTypes()) {
             sb.append("<tr><td style=\"padding:6px 0;border-bottom:1px solid #e1e7ee;font-family:monospace;font-size:11px\">")
@@ -124,23 +132,32 @@ public final class ReportRenderer {
 
     /** Decision-first email subject line without emoji. */
     public static String emailSubject(UnifiedReport r) {
-        String decision = needsReview(r) ? "PRÜFUNG" : "ERFOLGREICH";
-        if (needsReview(r)) {
-            return String.format("[CM Migrator] %s %s — %d Abweichungen — %s → %s",
-                    decision, r.operationType().name(), r.failed(), safe(r.sourceSSID(), "SOURCE"), safe(r.destSSID(), "DEST"));
+        if (hasTechnicalReview(r)) {
+            return String.format("[CM Migrator] PRÜFUNG %s — %s — %s → %s",
+                    r.operationType().name(), deviationCount(r.failed()),
+                    safe(r.sourceSSID(), "SOURCE"), safe(r.destSSID(), "DEST"));
         }
-        return String.format("[CM Migrator] %s %s — %,d Objekte — %s → %s",
-                decision, r.operationType().name(), r.success(), safe(r.sourceSSID(), "SOURCE"), safe(r.destSSID(), "DEST"));
+        if (verificationPending(r)) {
+            return String.format("[CM Migrator] VERIFIKATION AUSSTEHEND — %s — %s → %s",
+                    r.operationType().name(), safe(r.sourceSSID(), "SOURCE"), safe(r.destSSID(), "DEST"));
+        }
+        return String.format("[CM Migrator] ERFOLGREICH %s — %,d Objekte — %s → %s",
+                r.operationType().name(), r.success(), safe(r.sourceSSID(), "SOURCE"), safe(r.destSSID(), "DEST"));
     }
 
     private static void renderMast(StringBuilder sb, UnifiedReport r) {
-        boolean review = needsReview(r);
+        boolean technicalReview = hasTechnicalReview(r);
+        boolean verificationPending = verificationPending(r);
+        String decision = technicalReview ? "Prüfung erforderlich"
+                : verificationPending ? "Verifikation ausstehend" : "Freigabebereit";
+        String detail = technicalReview ? deviationCount(r.failed()) + " vor Freigabe bearbeiten"
+                : verificationPending ? "Separater Zielvergleich erforderlich"
+                : "Keine offenen technischen Abweichungen";
         sb.append("<header class=\"mast\"><div><div class=\"eyebrow\">CM Migrator · Abschlussbericht</div><h1>")
                 .append(esc(resultTitle(r))).append("</h1><div class=\"sub\">")
                 .append(esc(r.sourceSSID())).append(" → ").append(esc(r.destSSID())).append(" · Run ")
                 .append(esc(r.operationId())).append("</div></div><div class=\"decision\"><b>")
-                .append(review ? "Prüfung erforderlich" : "Freigabebereit").append("</b><span>")
-                .append(review ? n(r.failed()) + " Abweichungen vor Freigabe bearbeiten" : "Keine offenen technischen Abweichungen")
+                .append(decision).append("</b><span>").append(detail)
                 .append("</span></div></header>");
     }
 
@@ -167,21 +184,21 @@ public final class ReportRenderer {
                         + "<th>Priorität</th><th>Objekt</th><th>Ursache</th><th>Nächster Schritt</th></tr></thead><tbody>");
         for (ReportError error : errors) {
             sb.append("<tr><td><span class=\"severity\">FEHLER</span></td><td class=\"mono\">")
-                    .append(esc(error.itemId())).append("</td><td>").append(esc(trunc(error.message(), 140)))
+                    .append(esc(error.itemId())).append("</td><td>").append(escLines(trunc(error.message(), 140)))
                     .append("</td><td>Objekt prüfen und erneut migrieren</td></tr>");
         }
         sb.append("</tbody></table></div></section>");
     }
 
-    private static void renderItemTypes(StringBuilder sb, List<ItemTypeResult> items) {
+    private static void renderItemTypes(StringBuilder sb, UnifiedReport r) {
         sb.append("<section class=\"section\"><div class=\"section-title\"><h2>Ergebnis nach ItemType</h2><span>vollständige Statistik</span></div>"
                 + "<div class=\"table-wrap\"><table><thead><tr><th>Mapping</th><th>Erfolg</th><th>Fehler</th><th>Übersprungen</th><th>Verifikation</th></tr></thead><tbody>");
-        for (ItemTypeResult it : items) {
+        for (ItemTypeResult it : r.itemTypes()) {
             sb.append("<tr><td class=\"mono\">").append(esc(it.sourceType())).append(" → ").append(esc(it.destType()))
                     .append("</td><td class=\"ok\">").append(n(it.success())).append(" / ").append(n(it.total()))
                     .append("</td><td class=\"").append(it.failed() > 0 ? "bad" : "muted").append("\">")
                     .append(n(Math.max(0, it.failed()))).append("</td><td>").append(n(Math.max(0, it.skipped())))
-                    .append("</td><td>").append(it.verified() >= 0 ? n(it.verified()) : "Nicht ausgeführt")
+                    .append("</td><td>").append(verificationLabel(r, it))
                     .append("</td></tr>");
         }
         sb.append("</tbody></table></div></section>");
@@ -206,7 +223,7 @@ public final class ReportRenderer {
 
     private static String mailKpi(String value, String label, String color) {
         return "<td width=\"25%\" style=\"padding:10px 5px;text-align:center;background:#f8fafc;border:1px solid #e1e7ee\">"
-                + "<span style=\"display:block;font-size:16px;font-weight:bold;color:" + color + "\">" + esc(value) + "</span>"
+                + "<span style=\"font-size:16px;font-weight:bold;color:" + color + "\">" + esc(value) + "</span><br>"
                 + "<span style=\"font-size:8px;color:#758398\">" + esc(label) + "</span></td>";
     }
 
@@ -217,12 +234,30 @@ public final class ReportRenderer {
             case DELETE: operation = "Löschung"; break;
             default: operation = "Migration"; break;
         }
-        if (needsReview(r)) return operation + " mit Abweichungen abgeschlossen";
+        if (hasTechnicalReview(r)) return operation + " mit Abweichungen abgeschlossen";
+        if (verificationPending(r)) return operation + " abgeschlossen · Verifikation ausstehend";
         return operation + " erfolgreich abgeschlossen";
     }
 
-    private static boolean needsReview(UnifiedReport r) {
+    private static boolean hasTechnicalReview(UnifiedReport r) {
         return r.status() != OverallStatus.SUCCESS || r.failed() > 0;
+    }
+
+    private static boolean verificationPending(UnifiedReport r) {
+        return r.operationType() == OperationType.MIGRATION && !r.hasCompleteVerificationResults();
+    }
+
+    static String verificationLabel(UnifiedReport r, ItemTypeResult it) {
+        if (it.verified() >= 0) {
+            long checked = it.verified() + Math.max(0, it.mismatches()) + Math.max(0, it.orphaned());
+            if (r.operationType() == OperationType.MIGRATION && checked < it.success()) {
+                return n(checked) + " / " + n(it.success()) + " geprüft · ausstehend";
+            }
+            return n(it.verified());
+        }
+        if (verificationPending(r)) return "Verifikation ausstehend";
+        if (r.operationType() == OperationType.DELETE) return "Nicht anwendbar";
+        return "Nicht ausgeführt";
     }
 
     private static String safe(String value, String fallback) {
@@ -248,6 +283,14 @@ public final class ReportRenderer {
         if (value == null) return "";
         return value.replace("&", "&amp;").replace("<", "&lt;")
                 .replace(">", "&gt;").replace("\"", "&quot;").replace("'", "&#39;");
+    }
+
+    static String escLines(String value) {
+        return esc(value).replace("\r\n", "\n").replace('\r', '\n').replace("\n", "<br>");
+    }
+
+    static String deviationCount(long count) {
+        return n(count) + " " + (count == 1 ? "Abweichung" : "Abweichungen");
     }
 
     static String trunc(String value, int max) {

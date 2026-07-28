@@ -17,6 +17,7 @@ public final class VerifierRuntimeSafetyTest {
         testRunConfigurationPolicy();
         testRunCountersAndTerminalOutcome();
         testVerifierCoreAndCliPolicyContract();
+        testStaleOkReentersDefaultWorklist();
         testTerminationOutcomes();
         testInterruptRestoration();
         testExitAndWebStatusContract();
@@ -83,6 +84,48 @@ public final class VerifierRuntimeSafetyTest {
                 () -> Verifier.run(config.toString()));
         assertEquals(2, Verifier.runCli(new String[]{config.toString()}),
                 "CLI policy exit code");
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private static void testStaleOkReentersDefaultWorklist() throws Exception {
+        Class journalSchema = Class.forName("com.ibm.ecm.migration.Verifier$JournalSchema");
+        Class verifySchema = Class.forName("com.ibm.ecm.migration.Verifier$VerifySchema");
+        java.lang.reflect.Method builder = Verifier.class.getDeclaredMethod(
+                "buildWorklistSql", journalSchema, verifySchema);
+        builder.setAccessible(true);
+        String sql = (String) builder.invoke(null,
+                Enum.valueOf(journalSchema, "OLD_AUDITLOG"),
+                Enum.valueOf(verifySchema, "OLD_VERIFICATION_LOG"));
+
+        try (java.sql.Connection conn = java.sql.DriverManager.getConnection(
+                "jdbc:h2:mem:verifier-freshness;DB_CLOSE_DELAY=-1");
+             java.sql.Statement st = conn.createStatement()) {
+            st.execute("CREATE TABLE AUDIT_LOG (ITEM_ID VARCHAR(255) PRIMARY KEY, "
+                    + "DEST_ITEM_ID VARCHAR(255), CHECKSUM VARCHAR(64), STATUS VARCHAR(20), "
+                    + "MIGRATION_TIME TIMESTAMP)");
+            st.execute("CREATE TABLE VERIFICATION_LOG (ITEM_ID VARCHAR(255) PRIMARY KEY, "
+                    + "STATUS VARCHAR(50), VERIFIED_AT TIMESTAMP)");
+            st.execute("INSERT INTO AUDIT_LOG VALUES ('item-1', 'dest-1', 'hash-1', 'SUCCESS', "
+                    + "TIMESTAMP '2026-07-28 10:00:00')");
+            st.execute("INSERT INTO VERIFICATION_LOG VALUES ('item-1', 'OK', "
+                    + "TIMESTAMP '2026-07-28 09:00:00')");
+
+            assertEquals(1, countRows(conn, sql),
+                    "stale OK must re-enter verifier worklist after re-migration");
+            st.execute("UPDATE VERIFICATION_LOG SET VERIFIED_AT = TIMESTAMP '2026-07-28 11:00:00' "
+                    + "WHERE ITEM_ID = 'item-1'");
+            assertEquals(0, countRows(conn, sql),
+                    "fresh OK must stay out of verifier worklist");
+        }
+    }
+
+    private static int countRows(java.sql.Connection conn, String sql) throws Exception {
+        int count = 0;
+        try (java.sql.PreparedStatement ps = conn.prepareStatement(sql);
+             java.sql.ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) count++;
+        }
+        return count;
     }
 
     private static void testTerminationOutcomes() throws Exception {
